@@ -112,8 +112,10 @@ let lastAnimTime = performance.now();
 // --- CALCUL DES RAYONS ORBITAUX DYNAMIQUES (après chargement GLB) ---
 let r1 = 180, r2 = 320, r12 = 38, r22 = 38, r23 = 60, r24 = 48, r25 = 54; // valeurs par défaut
 
+let isModelLoaded = false;
+
 const loader = new GLTFLoader();
-loader.load('/public/Planetarium.glb', function (gltf) {
+loader.load(import.meta.env.BASE_URL + 'Planetarium.glb', function (gltf) {
   scene.add(gltf.scene);
   gltf.scene.position.set(0, 0, 0);
 
@@ -176,6 +178,7 @@ loader.load('/public/Planetarium.glb', function (gltf) {
   }
   // Calcul du rayon minimal de sécurité (rayon étoile + marge)
   minOrbitRadius = etoileRadius * 1.12; // 12% de marge
+  isModelLoaded = true;
 }, undefined, function (error) {
   console.error(error);
 });
@@ -267,9 +270,9 @@ function showProjectOverlay(type) {
       <div style="max-width:1200px;width:96vw;padding:40px 32px 32px 32px;background:#181818;border-radius:22px;box-shadow:0 8px 32px #000a;color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;">
         <h2 style="margin-top:0">Jumeau numérique de presse à injecter</h2>
         <div id="project-photos" style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;">
-          <img src="/public/sim3d_1.jpg.png" alt="Capture 1" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="/public/sim3d_2.jpg.png" alt="Capture 2" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="/public/sim3d_3.jpg.png" alt="Capture 3" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="${import.meta.env.BASE_URL}sim3d_1.jpg.png" alt="Capture 1" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="${import.meta.env.BASE_URL}sim3d_2.jpg.png" alt="Capture 2" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="${import.meta.env.BASE_URL}sim3d_3.jpg.png" alt="Capture 3" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
         </div>
         <button id="close-project-overlay" style="margin-top:8px;padding:12px 38px;font-size:1.2em;background:#fff;color:#222;border:none;border-radius:10px;cursor:pointer;">Retour</button>
       </div>
@@ -279,8 +282,8 @@ function showProjectOverlay(type) {
       <div style="max-width:1200px;width:96vw;padding:40px 32px 32px 32px;background:#181818;border-radius:22px;box-shadow:0 8px 32px #000a;color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;">
         <h2 style="margin-top:0">Exposition photo</h2>
         <div id="project-photos" style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;">
-          <img src="/public/expo_1.jpg.png" alt="Photo expo 1" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="/public/expo_2.jpg.png" alt="Photo expo 2" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="${import.meta.env.BASE_URL}expo_1.jpg.png" alt="Photo expo 1" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="${import.meta.env.BASE_URL}expo_2.jpg.png" alt="Photo expo 2" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
         </div>
         <button id="close-project-overlay" style="margin-top:8px;padding:12px 38px;font-size:1.2em;background:#fff;color:#222;border:none;border-radius:10px;cursor:pointer;">Retour</button>
       </div>
@@ -347,7 +350,7 @@ function updatePlanetariumTitle() {
 // Textes HTML riches pour chaque objet (astre ou satellite)
 const astroTexts = {
   'Etoile': `<h2>Bienvenue sur mon Planétarium !</h2><p>Utilisez les <b>flèches directionnelles</b> pour naviguer entre les astres et satellites.<br>Chaque planète ou satellite représente une facette de mon parcours ou de mes projets.<br><br><i>⭣/⭡</i> : changer d'astre principal<br><i>⭠/⭢</i> : naviguer entre planète et satellites<br><br>Bonne visite !</p>`,
-  'Planète_11': `<div style="display:flex;align-items:flex-start;"><img src="/public/perso_1.jpg" alt="Axel Mannu Corrieras" style="margin:0 18px 0 0;max-width:110px;border-radius:14px;box-shadow:0 2px 12px #0008;flex-shrink:0;" /><div><h2>Axel Mannu Corrieras</h2><p><a href="https://www.linkedin.com/in/axel-mannu-corrieras-6b4449284/" target="_blank" rel="noopener">Linkedin</a><p><p>Élève en école d'ingénierie.<p><p>Passionné par les arts et les sciences,<br>Ici, vous pourrez en découvrir plus sur mon parcours et mes centres d'intérêt.</p></div></div>`,
+  'Planète_11': `<div style="display:flex;align-items:flex-start;"><img src="${import.meta.env.BASE_URL}perso_1.jpg" alt="Axel Mannu Corrieras" style="margin:0 18px 0 0;max-width:110px;border-radius:14px;box-shadow:0 2px 12px #0008;flex-shrink:0;" /><div><h2>Axel Mannu Corrieras</h2><p><a href="https://www.linkedin.com/in/axel-mannu-corrieras-6b4449284/" target="_blank" rel="noopener">linkedin</a><p><p>Élève en école d'ingénierie.<p><p>Passionné par les arts et les sciences,<br>Ici, vous pourrez en découvrir plus sur mon parcours et mes centres d'intérêt.</p></div></div>`,
   'Roche004': `<h2>Formation & Diplômes</h2><ul><li>2024-2027 : Arts et Métiers ParisTech (ENSAM) – Ingénieur généraliste</li><li>2022-2024 : CPGE PCSI-PC* – Lycée Pierre Corneille, Rouen</li><li>2022 : Baccalauréat Scientifique – Mention TB</li><li>2020 : Brevet Initiation Aéronautique - Mention TB</li></ul>`,
   'Feuilles002': `<h2>Centres d'intérêt</h2><ul><li>Astrophysique, astronomie, physique</li><li>Photographie, astrophoto, argentique : <a href="https://www.instagram.com/axelcorrieras/" target="_blank" rel="noopener">insta</a></li><li>Piano --- 11 années au CRR Rouen</li><li>Composition musicale : <a href="https://soundcloud.com/user-163788646-509251636" target="_blank" rel="noopener">soundcloud</a></li><li>Poésie [symbolisme, romantisme, haïkaï]</li><li>Arts martiaux : Iaido, Iaijutsu, Kenjutsu</li></ul>`,
   'Planète_2': `<h2>Projets</h2><p>Explorez mes réalisations, projets scolaires et initiatives personnelles,<br>en parcourant les différents satellites.</p>`,
@@ -439,6 +442,7 @@ function animateHackerText(html, container, duration = 1100, interval = 18) {
 }
 
 function updateAstroText() {
+  if (!isModelLoaded) { infoContainer.style.display = 'none'; return; }
   const satList = satellites[currentAstreIndex];
   if (!satList) { infoContainer.style.display = 'none'; return; }
   const obj = satList[currentSatelliteIndex];
@@ -480,6 +484,7 @@ function updateAstroText() {
 }
 
 function updateAstroLabels(forceHide = false) {
+  if (!isModelLoaded) return;
   // Masque tous les labels d'abord
   Object.values(astroLabels).forEach(label => { label.style.opacity = '0'; });
   if (forceHide) return;
@@ -525,6 +530,7 @@ function updateAstroLabels(forceHide = false) {
 }
 
 function focusOnAstre() {
+  if (!isModelLoaded) return;
   const satList = satellites[currentAstreIndex];
   if (satList && satList[currentSatelliteIndex]) {
     const obj = satList[currentSatelliteIndex];
@@ -559,7 +565,8 @@ function focusOnAstre() {
       targetCameraPosition = cameraPos;
       lookAtTarget = etoilePos.clone().setY(0);
       targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 2 && (currentSatelliteIndex === 1 || currentSatelliteIndex === 2)) {
+    } else if (currentAstreIndex === 2 && (currentSatelliteIndex === 1 || currentSatelliteIndex === 2 || currentSatelliteIndex === 3 || currentSatelliteIndex === 4)) {
+      // Suivi spécial pour tous les satellites de la planète 2 (cubes)
       offset = new THREE.Vector3(0, 10, 5);
       targetCameraPosition = pos.clone().add(offset);
       lookAtTarget = pos.clone();
@@ -571,16 +578,6 @@ function focusOnAstre() {
       targetLookAt = lookAtTarget.clone();
     } else if (currentAstreIndex === 1 && currentSatelliteIndex === 2) {
       offset = new THREE.Vector3(0, 3, 1.5);
-      targetCameraPosition = pos.clone().add(offset);
-      lookAtTarget = pos.clone();
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 2 && currentSatelliteIndex === 3) {
-      offset = new THREE.Vector3(0, 18, 32);
-      targetCameraPosition = pos.clone().add(offset);
-      lookAtTarget = pos.clone();
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 2 && currentSatelliteIndex === 4) {
-      offset = new THREE.Vector3(0, 18, 32);
       targetCameraPosition = pos.clone().add(offset);
       lookAtTarget = pos.clone();
       targetLookAt = lookAtTarget.clone();
@@ -720,6 +717,7 @@ Array(2000).fill().forEach(addStar);
 
 // Render Loop
 function animate() {
+  if (!isModelLoaded) return;
   requestAnimationFrame(animate);
 
   // --- ANIMATION MANUELLE DES ASTRES ---
@@ -794,11 +792,7 @@ function animate() {
     const y = etoile.position.y + rCube012 * Math.sin(planetMotionState.theta24) * Math.sin(angleIncline3);
     const z = etoile.position.z + rCube012 * Math.sin(planetMotionState.theta24) * Math.cos(angleIncline3);
     cube012.position.set(x, y, z);
-    // Correction du lookAt pour la caméra si focus sur ce cube
-    if (camera.userData.targetObject === cube012) {
-      targetCameraPosition = cube012.position.clone().add(new THREE.Vector3(0, 18, 32));
-      targetLookAt = cube012.position.clone();
-    }
+    // Pas de rotation sur elle-même
   }
   // Cube013 (C4D3X) autour de l'étoile sur un cercle dans un plan incliné
   if (etoile && cube013) {
@@ -811,11 +805,6 @@ function animate() {
     cube013.position.set(x, y, z);
     planetMotionState.rot25 -= (2 * Math.PI / planetMotionParams.t25) * dt;
     cube013.rotation.y = planetMotionState.rot25;
-    // Correction du lookAt pour la caméra si focus sur ce cube
-    if (camera.userData.targetObject === cube013) {
-      targetCameraPosition = cube013.position.clone().add(new THREE.Vector3(0, 18, 32));
-      targetLookAt = cube013.position.clone();
-    }
   }
 
   if (camera.userData.targetObject) {
@@ -844,7 +833,7 @@ function animate() {
       nextTargetCameraPosition = pos.clone().add(axis.clone().multiplyScalar(5));
       nextTargetCameraPosition.y = 0;
       nextTargetLookAt = etoilePos.clone().setY(0);
-    } else if (currentAstreIndex === 2 && (currentSatelliteIndex === 1 || currentSatelliteIndex === 2)) {
+    } else if (currentAstreIndex === 2 && (currentSatelliteIndex === 1 || currentSatelliteIndex === 2 || currentSatelliteIndex === 3 || currentSatelliteIndex === 4)) {
       nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 10, 5));
       nextTargetLookAt = pos.clone();
     } else if (currentAstreIndex === 1 && currentSatelliteIndex === 1) {
@@ -852,12 +841,6 @@ function animate() {
       nextTargetLookAt = pos.clone();
     } else if (currentAstreIndex === 1 && currentSatelliteIndex === 2) {
       nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 3, 1.5));
-      nextTargetLookAt = pos.clone();
-    } else if (currentAstreIndex === 2 && currentSatelliteIndex === 3) {
-      nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 18, 32));
-      nextTargetLookAt = pos.clone();
-    } else if (currentAstreIndex === 2 && currentSatelliteIndex === 4) {
-      nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 18, 32));
       nextTargetLookAt = pos.clone();
     } else {
       const planete = satellites[currentAstreIndex][0];
