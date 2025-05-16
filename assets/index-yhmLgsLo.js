@@ -3828,9 +3828,9 @@ void main() {
       <div style="max-width:1200px;width:96vw;padding:40px 32px 32px 32px;background:#181818;border-radius:22px;box-shadow:0 8px 32px #000a;color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;">
         <h2 style="margin-top:0">Jumeau numérique de presse à injecter</h2>
         <div id="project-photos" style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;">
-          <img src="/mon-planetarium/sim3d_1.jpg.png" alt="Capture 1" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="/mon-planetarium/sim3d_2.jpg.png" alt="Capture 2" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="/mon-planetarium/sim3d_3.jpg.png" alt="Capture 3" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="/sim3d_1.jpg.png" alt="Capture 1" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="/sim3d_2.jpg.png" alt="Capture 2" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="/sim3d_3.jpg.png" alt="Capture 3" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
         </div>
         <button id="close-project-overlay" style="margin-top:8px;padding:12px 38px;font-size:1.2em;background:#fff;color:#222;border:none;border-radius:10px;cursor:pointer;">Retour</button>
       </div>
@@ -3838,8 +3838,8 @@ void main() {
       <div style="max-width:1200px;width:96vw;padding:40px 32px 32px 32px;background:#181818;border-radius:22px;box-shadow:0 8px 32px #000a;color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;">
         <h2 style="margin-top:0">Exposition photo</h2>
         <div id="project-photos" style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;">
-          <img src="/mon-planetarium/expo_1.jpg.png" alt="Photo expo 1" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="/mon-planetarium/expo_2.jpg.png" alt="Photo expo 2" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="/expo_1.jpg.png" alt="Photo expo 1" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
+          <img src="/expo_2.jpg.png" alt="Photo expo 2" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
         </div>
         <button id="close-project-overlay" style="margin-top:8px;padding:12px 38px;font-size:1.2em;background:#fff;color:#222;border:none;border-radius:10px;cursor:pointer;">Retour</button>
       </div>
