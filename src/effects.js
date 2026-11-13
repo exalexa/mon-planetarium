@@ -402,3 +402,94 @@ export function createComposer(renderer, scene, camera) {
   composer.addPass(film);
   return { composer, bloom, film };
 }
+
+// --- Ceinture d'astéroïdes : rochers facettés instanciés, répartis sur un anneau épais ---
+export function createAsteroidBelt({ inner, outer, count = 900, thickness = 6, color = 0x8b8073, size = [0.4, 2.2], seed = 1 }) {
+  let s = seed * 9973;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const geo = new THREE.IcosahedronGeometry(1, 0);
+  // Déformation pour des rochers irréguliers
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setXYZ(i, p.getX(i) * (0.8 + ((i * 7) % 5) * 0.08), p.getY(i) * (0.7 + ((i * 3) % 4) * 0.1), p.getZ(i));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, flatShading: true });
+  const mesh = new THREE.InstancedMesh(geo, mat, count);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const a = rnd() * Math.PI * 2;
+    // Densité plus forte au milieu de l'anneau
+    const t = (rnd() + rnd() + rnd()) / 3;
+    const r = inner + t * (outer - inner);
+    v.set(Math.cos(a) * r, (rnd() - 0.5) * thickness * (1 - Math.abs(t - 0.5)), Math.sin(a) * r);
+    e.set(rnd() * 6.3, rnd() * 6.3, rnd() * 6.3);
+    q.setFromEuler(e);
+    const k = size[0] + Math.pow(rnd(), 3) * (size[1] - size[0]);
+    sc.set(k * (0.7 + rnd() * 0.6), k * (0.6 + rnd() * 0.5), k * (0.7 + rnd() * 0.6));
+    m.compose(v, q, sc);
+    mesh.setMatrixAt(i, m);
+    mesh.setColorAt(i, c.set(color).offsetHSL(0, (rnd() - 0.5) * 0.08, (rnd() - 0.5) * 0.12));
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+// --- Galaxies lointaines peintes sur des plans, accrochées au ciel ---
+function galaxyTexture(kind, seed) {
+  let s = seed * 7919 + 1;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const N = 512, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const x = c.getContext('2d');
+  const cx = N / 2, cy = N / 2;
+  const core = x.createRadialGradient(cx, cy, 0, cx, cy, N * (kind === 'elliptical' ? 0.45 : 0.16));
+  core.addColorStop(0, 'rgba(255,236,200,0.95)');
+  core.addColorStop(0.35, 'rgba(255,200,140,0.35)');
+  core.addColorStop(1, 'rgba(255,180,120,0)');
+  x.fillStyle = core;
+  x.fillRect(0, 0, N, N);
+  if (kind === 'spiral') {
+    const arms = 2 + Math.floor(rnd() * 2);
+    const b = 0.22 + rnd() * 0.1;
+    for (let i = 0; i < 9000; i++) {
+      const arm = i % arms;
+      const th = rnd() * 4.6;
+      const r = 14 * Math.exp(b * th * 1.9) * (0.85 + rnd() * 0.3);
+      if (r > N * 0.48) continue;
+      const ang = th + (arm / arms) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
+      const px = cx + Math.cos(ang) * r, py = cy + Math.sin(ang) * r;
+      const blue = r / (N * 0.48);
+      x.fillStyle = `rgba(${Math.round(255 - blue * 90)},${Math.round(220 - blue * 30)},${Math.round(190 + blue * 65)},${0.05 + rnd() * 0.18})`;
+      const sz = 1 + rnd() * 2.2;
+      x.fillRect(px, py, sz, sz);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+export function createGalaxies(radius = 8000, count = 9) {
+  const g = new THREE.Group();
+  let s = 4242;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const tex = [galaxyTexture('spiral', 1), galaxyTexture('spiral', 2), galaxyTexture('spiral', 3), galaxyTexture('elliptical', 4)];
+  for (let i = 0; i < count; i++) {
+    const dir = new THREE.Vector3(rnd() - 0.5, (rnd() - 0.5) * 1.4, rnd() - 0.5).normalize();
+    const size = i === 0 ? 1900 : 280 + rnd() * 650;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(size, size),
+      new THREE.MeshBasicMaterial({
+        map: tex[i === 0 ? 0 : Math.floor(rnd() * tex.length)], transparent: true, opacity: i === 0 ? 0.75 : 0.5 + rnd() * 0.4,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    mesh.position.copy(dir).multiplyScalar(radius);
+    mesh.lookAt(0, 0, 0);
+    mesh.rotateZ(rnd() * Math.PI * 2);
+    mesh.rotateX(0.3 + rnd() * 1.0);
+    mesh.renderOrder = -8;
+    g.add(mesh);
+  }
+  return g;
+}

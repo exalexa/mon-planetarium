@@ -147,6 +147,7 @@ export const TEXTS = {
     <p class="log-kicker">ASTRA · GAIA</p>
     <h2>Données et outils</h2>
     <p>Le satellite Gaia de l'ESA cartographie plus d'un milliard d'étoiles de notre galaxie. Ses données, croisées avec des relevés spectroscopiques, sont au cœur de mon travail.</p>
+    <p class="log-muted">Comme le vrai Gaia, il décrit ici une orbite de Lissajous autour du point de Lagrange L2 d'ASTRA, dans l'alignement soleil–planète.</p>
     <h3>Relevés</h3>
     <p class="log-tags">Gaia DR3 · APOGEE DR19 · GALAH DR3 · StarHorse</p>
     <h3>Modélisation</h3>
@@ -156,6 +157,7 @@ export const TEXTS = {
     <p class="log-kicker">ASTRA · EUCLID</p>
     <h2>Thèmes de recherche</h2>
     <p>Le télescope Euclid explore l'univers sombre. Mes centres d'intérêt vont de la même façon des étoiles de notre galaxie jusqu'aux grandes échelles.</p>
+    <p class="log-muted">Il partage le point L2 d'ASTRA avec Gaia, sur une orbite de halo plus serrée.</p>
     <ul>
       <li>Dynamique galactique</li>
       <li>Archéologie galactique</li>

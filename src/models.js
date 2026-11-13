@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // ---------------------------------------------------------------------------
 // Outils
 // ---------------------------------------------------------------------------
-function mulberry32(seed) {
+export function mulberry32(seed) {
   return function () {
     seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -30,7 +30,7 @@ function noise3(x, y, z) {
     sz
   );
 }
-function fbm3(x, y, z, oct = 4) {
+export function fbm3(x, y, z, oct = 4) {
   let v = 0, a = 0.5;
   for (let i = 0; i < oct; i++) {
     v += a * noise3(x, y, z);
@@ -40,24 +40,24 @@ function fbm3(x, y, z, oct = 4) {
   return v;
 }
 
-const mat = (color, o = {}) =>
+export const mat = (color, o = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, flatShading: true, ...o });
-const glow = (color, intensity = 2) =>
+export const glow = (color, intensity = 2) =>
   new THREE.MeshStandardMaterial({ color: 0x111111, emissive: color, emissiveIntensity: intensity, roughness: 1 });
 
-function add(parent, geometry, material, x = 0, y = 0, z = 0, rot = null) {
+export function add(parent, geometry, material, x = 0, y = 0, z = 0, rot = null) {
   const m = new THREE.Mesh(geometry, material);
   m.position.set(x, y, z);
   if (rot) m.rotation.set(rot[0], rot[1], rot[2]);
   parent.add(m);
   return m;
 }
-const box = (p, w, h, d, m, x, y, z, rot) => add(p, new THREE.BoxGeometry(w, h, d), m, x, y + h / 2, z, rot);
-const cyl = (p, rt, rb, h, seg, m, x, y, z, rot) => add(p, new THREE.CylinderGeometry(rt, rb, h, seg), m, x, y + h / 2, z, rot);
-const cone = (p, r, h, seg, m, x, y, z, rot) => add(p, new THREE.ConeGeometry(r, h, seg), m, x, y + h / 2, z, rot);
+export const box = (p, w, h, d, m, x, y, z, rot) => add(p, new THREE.BoxGeometry(w, h, d), m, x, y + h / 2, z, rot);
+export const cyl = (p, rt, rb, h, seg, m, x, y, z, rot) => add(p, new THREE.CylinderGeometry(rt, rb, h, seg), m, x, y + h / 2, z, rot);
+export const cone = (p, r, h, seg, m, x, y, z, rot) => add(p, new THREE.ConeGeometry(r, h, seg), m, x, y + h / 2, z, rot);
 
 // Toit à deux pans (prisme triangulaire), faîtage selon X
-function gableRoof(p, w, h, d, m, x, y, z) {
+export function gableRoof(p, w, h, d, m, x, y, z) {
   const s = new THREE.Shape();
   s.moveTo(-d / 2, 0); s.lineTo(d / 2, 0); s.lineTo(0, h); s.closePath();
   const g = new THREE.ExtrudeGeometry(s, { depth: w, bevelEnabled: false });
@@ -66,7 +66,7 @@ function gableRoof(p, w, h, d, m, x, y, z) {
   return add(p, g, m, x, y, z);
 }
 // Toit mansardé (trapèze), faîtage selon X
-function mansardRoof(p, w, h, d, m, x, y, z, inset = 0.28) {
+export function mansardRoof(p, w, h, d, m, x, y, z, inset = 0.28) {
   const s = new THREE.Shape();
   s.moveTo(-d / 2, 0); s.lineTo(d / 2, 0); s.lineTo(d / 2 - d * inset, h); s.lineTo(-d / 2 + d * inset, h); s.closePath();
   const g = new THREE.ExtrudeGeometry(s, { depth: w, bevelEnabled: false });
@@ -75,7 +75,7 @@ function mansardRoof(p, w, h, d, m, x, y, z, inset = 0.28) {
   return add(p, g, m, x, y, z);
 }
 // Rangées de fenêtres éclairées sur une façade (face +Z ou -Z)
-function windows(p, { w, rows, cols, y0, dy, z, h = 0.09, ww = 0.07, m }) {
+export function windows(p, { w, rows, cols, y0, dy, z, h = 0.09, ww = 0.07, m }) {
   const g = new THREE.BoxGeometry(ww, h, 0.02);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -84,17 +84,17 @@ function windows(p, { w, rows, cols, y0, dy, z, h = 0.09, ww = 0.07, m }) {
     }
   }
 }
-function tree(p, x, y, z, s = 1, color = 0x3f6b3a) {
+export function tree(p, x, y, z, s = 1, color = 0x3f6b3a) {
   cyl(p, 0.025 * s, 0.035 * s, 0.14 * s, 5, mat(0x5a3d26), x, y, z);
   add(p, new THREE.IcosahedronGeometry(0.13 * s, 0), mat(color), x, y + 0.24 * s, z);
 }
-function pine(p, x, y, z, s = 1, color = 0x2f5a3a) {
+export function pine(p, x, y, z, s = 1, color = 0x2f5a3a) {
   cyl(p, 0.02 * s, 0.03 * s, 0.1 * s, 5, mat(0x4b3322), x, y, z);
   cone(p, 0.14 * s, 0.36 * s, 6, mat(color), x, y + 0.08 * s, z);
 }
 
 // Place un objet sur une sphère, orienté selon la normale
-function placeOnSphere(obj, radius, dir) {
+export function placeOnSphere(obj, radius, dir) {
   const n = dir.clone().normalize();
   obj.position.copy(n).multiplyScalar(radius);
   obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
@@ -152,255 +152,6 @@ export function createPlanet({ radius, seed = 1, detail = 5, amp = 0.07, freq = 
     group.add(t);
   }
   return group;
-}
-
-// Lune cratérisée avec, si demandé, un plateau au pôle nord pour y poser un bâtiment
-export function createMoon({ radius = 3, seed = 3, colors = [0x6f6a64, 0x8e877c, 0xb2a894], plateau = true, craters = 8 }) {
-  const geometry = new THREE.IcosahedronGeometry(radius, 4);
-  const pos = geometry.attributes.position;
-  const v = new THREE.Vector3();
-  const rnd = mulberry32(seed * 77);
-  const list = Array.from({ length: craters }, () => {
-    const c = new THREE.Vector3(rnd() - 0.5, rnd() - 0.6, rnd() - 0.5).normalize();
-    return { c, r: 0.22 + rnd() * 0.3 };
-  });
-  const plateauY = 0.8;
-  const hs = new Float32Array(pos.count);
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i).normalize();
-    let h = 1 + (fbm3(v.x * 3 + seed, v.y * 3, v.z * 3) - 0.5) * 0.12;
-    for (const { c, r } of list) {
-      if (plateau && c.y > 0.55) continue;
-      const d = v.distanceTo(c);
-      if (d < r) {
-        const k = d / r;
-        h -= 0.08 * (1 - k * k) - 0.025 * Math.exp(-Math.pow((k - 0.92) * 9, 2));
-      }
-    }
-    hs[i] = h;
-    v.multiplyScalar(radius * h);
-    if (plateau && v.y > radius * plateauY) v.y = radius * plateauY + (v.y - radius * plateauY) * 0.04;
-    pos.setXYZ(i, v.x, v.y, v.z);
-  }
-  const cols = new Float32Array(pos.count * 3);
-  const c = new THREE.Color();
-  for (let i = 0; i < pos.count; i += 3) {
-    const h = (hs[i] + hs[i + 1] + hs[i + 2]) / 3;
-    const t = THREE.MathUtils.clamp((h - 0.9) / 0.15, 0, 1);
-    const k = Math.min(colors.length - 2, Math.floor(t * (colors.length - 1)));
-    c.set(colors[k]).lerp(new THREE.Color(colors[k + 1]), t * (colors.length - 1) - k);
-    const y = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
-    if (plateau && y > radius * (plateauY - 0.01)) c.lerp(new THREE.Color(colors[colors.length - 1]), 0.6);
-    for (let j = 0; j < 3; j++) cols.set([c.r, c.g, c.b], (i + j) * 3);
-  }
-  geometry.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  geometry.computeVertexNormals();
-  const group = new THREE.Group();
-  group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 })));
-  group.userData.topY = plateau ? radius * plateauY : radius;
-  return group;
-}
-
-// Lune portant un monument sur son plateau
-export function createLandmarkMoon({ radius = 3, seed, colors, landmark, scale = 1 }) {
-  const moon = createMoon({ radius, seed, colors });
-  const lm = landmark();
-  lm.scale.setScalar(scale);
-  lm.position.y = moon.userData.topY - 0.02;
-  moon.add(lm);
-  return moon;
-}
-
-// ---------------------------------------------------------------------------
-// Lieux d'études
-// ---------------------------------------------------------------------------
-const STONE = 0xd8ccb2, STONE_WARM = 0xcdb894, SLATE = 0x464d5c, ZINC = 0x7d8a99, LIT = 0xffb35a;
-
-// Lycée Pierre Corneille, Rouen : long bâtiment classique + chapelle à fronton
-export function lyceeCorneille() {
-  const g = new THREE.Group();
-  const stone = mat(STONE), slate = mat(SLATE), win = glow(LIT, 1.6);
-  // Aile principale
-  box(g, 2.6, 0.75, 0.7, stone, 0, 0, 0.25);
-  mansardRoof(g, 2.6, 0.28, 0.7, slate, 0, 0.75, 0.25);
-  windows(g, { w: 2.5, rows: 3, cols: 13, y0: 0.13, dy: 0.22, z: 0.25 + 0.36, m: win });
-  windows(g, { w: 2.5, rows: 3, cols: 13, y0: 0.13, dy: 0.22, z: 0.25 - 0.36, m: win });
-  // Aile en retour
-  box(g, 0.6, 0.75, 1.0, stone, -1.0, 0, -0.55);
-  mansardRoof(g, 1.0, 0.28, 0.6, slate, -1.0, 0.75, -0.55).rotation.y = Math.PI / 2;
-  // Chapelle
-  const ch = new THREE.Group(); ch.position.set(0.85, 0, -0.65); g.add(ch);
-  box(ch, 0.7, 1.05, 1.0, mat(0xe2d6bc), 0, 0, 0);
-  gableRoof(ch, 1.0, 0.38, 0.7, slate, 0, 1.05, 0).rotation.y = Math.PI / 2;
-  // Fronton et pilastres côté +Z
-  const front = new THREE.Shape();
-  front.moveTo(-0.38, 0); front.lineTo(0.38, 0); front.lineTo(0, 0.3); front.closePath();
-  add(ch, new THREE.ExtrudeGeometry(front, { depth: 0.06, bevelEnabled: false }), mat(0xeee3cb), 0, 1.05, 0.5);
-  for (const x of [-0.27, -0.09, 0.09, 0.27]) box(ch, 0.05, 1.0, 0.05, mat(0xf1e8d4), x, 0, 0.52);
-  add(ch, new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16), win, 0, 0.75, 0.53, [Math.PI / 2, 0, 0]);
-  // Lanternon
-  cyl(ch, 0.09, 0.11, 0.22, 8, mat(0xe2d6bc), 0, 1.3, -0.2);
-  cone(ch, 0.12, 0.22, 8, slate, 0, 1.52, -0.2);
-  // Arbres de la cour
-  tree(g, 0.2, 0, -0.5, 1.2); tree(g, -0.35, 0, -0.75, 1.1); tree(g, 1.25, 0, 0.75, 1);
-  return g;
-}
-
-// Abbaye de Cluny : clocher de l'Eau-Bénite octogonal + tour de l'Horloge
-export function abbayeCluny() {
-  const g = new THREE.Group();
-  const stone = mat(STONE_WARM), dark = mat(0x1d1a17), slate = mat(0x5a4a42);
-  // Fragment du transept
-  box(g, 1.7, 1.3, 0.75, stone, 0, 0, 0);
-  gableRoof(g, 1.7, 0.45, 0.75, slate, 0, 1.3, 0);
-  for (const x of [-0.6, -0.2, 0.2, 0.6]) {
-    box(g, 0.12, 0.38, 0.02, dark, x, 0.55, 0.38);
-    add(g, new THREE.CylinderGeometry(0.06, 0.06, 0.02, 10, 1, false, 0, Math.PI), dark, x, 0.93, 0.385, [Math.PI / 2, 0, Math.PI / 2]);
-  }
-  // Clocher octogonal
-  const t = new THREE.Group(); t.position.set(0, 1.3, 0); g.add(t);
-  cyl(t, 0.36, 0.4, 0.2, 8, stone, 0, 0.15, 0);
-  cyl(t, 0.33, 0.36, 0.45, 8, stone, 0, 0.35, 0);
-  cyl(t, 0.3, 0.33, 0.42, 8, stone, 0, 0.8, 0);
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-    for (const [yy, rr] of [[0.47, 0.345], [0.9, 0.315]]) {
-      const w = add(t, new THREE.BoxGeometry(0.1, 0.2, 0.02), dark, Math.sin(a) * rr, yy + 0.1, Math.cos(a) * rr);
-      w.rotation.y = a;
-    }
-  }
-  cone(t, 0.34, 0.75, 8, slate, 0, 1.22, 0);
-  // Tour de l'Horloge
-  box(g, 0.42, 1.55, 0.42, stone, 1.15, 0, 0.55);
-  cone(g, 0.33, 0.45, 4, slate, 1.15, 1.55, 0.55, [0, Math.PI / 4, 0]);
-  add(g, new THREE.CylinderGeometry(0.08, 0.08, 0.02, 16), glow(0xffe2a8, 1.2), 1.15, 1.25, 0.77, [Math.PI / 2, 0, 0]);
-  // Bâtiment conventuel bas (campus)
-  box(g, 1.1, 0.55, 0.5, mat(0xe0d2b6), -1.05, 0, 0.75);
-  mansardRoof(g, 1.1, 0.2, 0.5, mat(SLATE), -1.05, 0.55, 0.75);
-  windows(g, { w: 1.0, rows: 2, cols: 6, y0: 0.12, dy: 0.2, z: 0.75 + 0.26, m: glow(LIT, 1.4) });
-  // Clin d'œil gadzarts
-  tree(g, -1.2, 0, -0.55, 1.1); tree(g, 0.9, 0, -0.65, 1.2);
-  return g;
-}
-
-// Arts et Métiers, campus de Paris : façade haussmannienne + pavillon central, et une petite tour Eiffel
-export function ensamParis() {
-  const g = new THREE.Group();
-  const stone = mat(0xe6dac2), zinc = mat(ZINC, { roughness: 0.6 }), win = glow(LIT, 1.5);
-  box(g, 2.4, 0.85, 0.75, stone, -0.25, 0, 0.1);
-  mansardRoof(g, 2.4, 0.3, 0.75, zinc, -0.25, 0.85, 0.1);
-  windows(g, { w: 2.3, rows: 3, cols: 12, y0: 0.14, dy: 0.24, z: 0.1 + 0.385, m: win });
-  // Pavillon central
-  const pv = new THREE.Group(); pv.position.set(-0.25, 0, 0.2); g.add(pv);
-  box(pv, 0.75, 1.1, 0.75, mat(0xeee3cc), 0, 0, 0);
-  for (const x of [-0.27, -0.09, 0.09, 0.27]) cyl(pv, 0.035, 0.035, 0.75, 8, mat(0xf6eedd), x, 0.02, 0.4);
-  const ped = new THREE.Shape(); ped.moveTo(-0.4, 0); ped.lineTo(0.4, 0); ped.lineTo(0, 0.22); ped.closePath();
-  add(pv, new THREE.ExtrudeGeometry(ped, { depth: 0.08, bevelEnabled: false }), mat(0xf6eedd), 0, 0.8, 0.36);
-  mansardRoof(pv, 0.75, 0.32, 0.75, zinc, 0, 1.1, 0);
-  // Drapeau
-  cyl(pv, 0.01, 0.01, 0.45, 5, mat(0x333333), 0, 1.4, 0);
-  box(pv, 0.07, 0.12, 0.01, mat(0x1f3a93), 0.045, 1.7, 0);
-  box(pv, 0.07, 0.12, 0.01, mat(0xf5f5f5), 0.115, 1.7, 0);
-  box(pv, 0.07, 0.12, 0.01, mat(0xd62828), 0.185, 1.7, 0);
-  // Tour Eiffel stylisée
-  const e = new THREE.Group(); e.position.set(1.25, 0, -0.45); g.add(e);
-  const iron = mat(0x6e4f39, { roughness: 0.7, metalness: 0.3 });
-  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-    const leg = add(e, new THREE.CylinderGeometry(0.03, 0.06, 0.6, 4), iron, sx * 0.17, 0.27, sz * 0.17);
-    leg.rotation.set(sz * -0.32, 0, sx * 0.32);
-  }
-  box(e, 0.42, 0.05, 0.42, iron, 0, 0.5, 0);
-  add(e, new THREE.CylinderGeometry(0.08, 0.16, 0.55, 4), iron, 0, 0.8, 0, [0, Math.PI / 4, 0]);
-  box(e, 0.2, 0.04, 0.2, iron, 0, 1.07, 0);
-  add(e, new THREE.CylinderGeometry(0.015, 0.075, 0.75, 4), iron, 0, 1.47, 0, [0, Math.PI / 4, 0]);
-  add(e, new THREE.SphereGeometry(0.03, 6, 6), glow(0xffd28a, 3), 0, 1.86, 0);
-  tree(g, 0.85, 0, 0.75, 1); tree(g, -1.6, 0, -0.5, 1.1);
-  return g;
-}
-
-// Le Mans Université : bâtiments modernes + circuit des 24 Heures
-export function universiteLeMans() {
-  const g = new THREE.Group();
-  const concrete = mat(0xe9e5dc), glass = new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x6fb8ff, emissiveIntensity: 0.9, roughness: 0.2, metalness: 0.4 });
-  box(g, 1.3, 0.7, 0.55, concrete, -0.15, 0, -0.2);
-  for (let i = 0; i < 3; i++) box(g, 1.24, 0.08, 0.57, glass, -0.15, 0.12 + i * 0.2, -0.2);
-  box(g, 0.55, 1.0, 0.55, concrete, 0.55, 0, -0.2);
-  for (let i = 0; i < 4; i++) box(g, 0.57, 0.08, 0.49, glass, 0.55, 0.12 + i * 0.21, -0.2);
-  box(g, 0.6, 0.06, 0.6, mat(0x9aa3ad), 0.55, 1.0, -0.2);
-  box(g, 0.5, 0.4, 0.9, concrete, -0.55, 0, 0.45);
-  box(g, 0.52, 0.08, 0.6, glass, -0.55, 0.16, 0.45);
-  // Circuit
-  const track = add(g, new THREE.RingGeometry(1.25, 1.45, 48), new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.9, side: THREE.DoubleSide }), 0, 0.012, 0, [-Math.PI / 2, 0, 0]);
-  track.scale.set(1, 0.85, 1);
-  add(g, new THREE.RingGeometry(1.44, 1.47, 48), mat(0xe8e1d0, { side: THREE.DoubleSide }), 0, 0.014, 0, [-Math.PI / 2, 0, 0]).scale.set(1, 0.85, 1);
-  // Ligne de départ en damier
-  for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++)
-    box(g, 0.05, 0.005, 0.05, mat((i + j) % 2 ? 0x111111 : 0xffffff), 1.29 + i * 0.05, 0.014, -0.02 + j * 0.05);
-  // Petite voiture rouge
-  const car = new THREE.Group(); car.position.set(-0.05, 0.015, 1.15); car.rotation.y = 0.15; g.add(car);
-  box(car, 0.24, 0.06, 0.11, mat(0xd8342c, { roughness: 0.4 }), 0, 0.02, 0);
-  box(car, 0.1, 0.05, 0.09, mat(0x1b2733), -0.02, 0.08, 0);
-  add(car, new THREE.SphereGeometry(0.02, 6, 6), glow(0xfff2c0, 4), 0.125, 0.05, 0.035);
-  add(car, new THREE.SphereGeometry(0.02, 6, 6), glow(0xfff2c0, 4), 0.125, 0.05, -0.035);
-  tree(g, 0.6, 0, 0.6, 0.9); tree(g, 0.9, 0, 0.3, 0.8);
-  return g;
-}
-
-// Aix-Marseille Université : Notre-Dame de la Garde sur sa colline, campus et palmier
-export function amuMarseille() {
-  const g = new THREE.Group();
-  const white = mat(0xf0ebe0), green = mat(0x6f8c74), gold = new THREE.MeshStandardMaterial({ color: 0xd4a640, emissive: 0xffb540, emissiveIntensity: 1.8, metalness: 0.8, roughness: 0.3 });
-  cone(g, 0.95, 0.7, 7, mat(0xd6cdb9), 0.35, -0.05, -0.25);
-  const b = new THREE.Group(); b.position.set(0.35, 0.6, -0.25); g.add(b);
-  // Basilique à assises bicolores
-  for (let i = 0; i < 5; i++) box(b, 0.75, 0.07, 0.36, i % 2 ? green : white, -0.1, i * 0.07, 0);
-  cyl(b, 0.14, 0.14, 0.12, 10, white, -0.35, 0.35, 0);
-  add(b, new THREE.SphereGeometry(0.14, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), green, -0.35, 0.47, 0);
-  // Clocher
-  for (let i = 0; i < 8; i++) box(b, 0.24, 0.08, 0.24, i % 2 ? green : white, 0.32, i * 0.08, 0);
-  box(b, 0.2, 0.2, 0.2, white, 0.32, 0.64, 0);
-  box(b, 0.12, 0.12, 0.12, white, 0.32, 0.84, 0);
-  cyl(b, 0.03, 0.05, 0.1, 6, white, 0.32, 0.96, 0);
-  // La « Bonne Mère » dorée
-  cyl(b, 0.025, 0.04, 0.16, 8, gold, 0.32, 1.06, 0);
-  add(b, new THREE.SphereGeometry(0.025, 8, 6), gold, 0.32, 1.25, 0);
-  // Bâtiment universitaire
-  box(g, 1.0, 0.45, 0.45, mat(0xf4f1ea), -0.75, 0, 0.6);
-  for (let i = 0; i < 2; i++) box(g, 1.02, 0.07, 0.47, new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x7cc8ff, emissiveIntensity: 0.8 }), -0.75, 0.1 + i * 0.18, 0.6);
-  box(g, 0.08, 0.6, 0.08, mat(0x1c5aa8), -0.2, 0, 0.6);
-  // Palmier
-  const palm = new THREE.Group(); palm.position.set(0.55, 0, 0.85); g.add(palm);
-  const trunk = add(palm, new THREE.CylinderGeometry(0.025, 0.04, 0.6, 5), mat(0x8a6a48), 0, 0.3, 0);
-  trunk.rotation.z = 0.12;
-  for (let i = 0; i < 6; i++) {
-    const leaf = add(palm, new THREE.BoxGeometry(0.32, 0.01, 0.06), mat(0x4f8a3c), 0, 0.6, 0);
-    leaf.rotation.set(0, (i / 6) * Math.PI * 2, -0.35);
-    leaf.translateX(0.15);
-  }
-  return g;
-}
-
-// Observatoire de Meudon : château et Grande Coupole
-export function observatoireMeudon() {
-  const g = new THREE.Group();
-  const stone = mat(0xe4d9c2), slate = mat(SLATE), win = glow(LIT, 1.5);
-  const dome = new THREE.MeshStandardMaterial({ color: 0xb9c3cc, metalness: 0.65, roughness: 0.35, flatShading: true });
-  box(g, 2.6, 0.75, 0.75, stone, 0, 0, 0);
-  mansardRoof(g, 2.6, 0.3, 0.75, slate, 0, 0.75, 0);
-  windows(g, { w: 2.5, rows: 2, cols: 13, y0: 0.15, dy: 0.28, z: 0.385, m: win });
-  // Avant-corps et tambour
-  box(g, 0.8, 0.95, 0.85, mat(0xece2cd), 0, 0, 0.05);
-  cyl(g, 0.62, 0.62, 0.32, 24, mat(0xe9dfc8), 0, 0.95, 0);
-  // Grande Coupole
-  add(g, new THREE.SphereGeometry(0.66, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), dome, 0, 1.27, 0);
-  box(g, 0.12, 0.62, 0.05, mat(0x15181c), 0, 1.3, 0.48, [-0.55, 0, 0]);
-  // Petite coupole (lunette)
-  cyl(g, 0.22, 0.22, 0.25, 16, stone, 1.05, 0.75, -0.05);
-  add(g, new THREE.SphereGeometry(0.24, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), dome, 1.05, 1.0, -0.05);
-  // Forêt de Meudon
-  for (const [x, z, s] of [[-1.1, -0.8, 1.2], [-0.6, -0.95, 1], [0.6, -0.9, 1.1], [1.25, 0.75, 1], [-1.3, 0.75, 1.15], [0.1, -1.05, 0.9]])
-    tree(g, x, 0, z, s, 0x3a5e35);
-  return g;
 }
 
 // ---------------------------------------------------------------------------
@@ -521,48 +272,6 @@ export function glenoidImplant() {
   const wrap = new THREE.Group();
   wrap.add(g);
   return wrap;
-}
-
-// Pylône électrique (Enedis Data Challenge) avec points de données lumineux
-export function enedisPylon() {
-  const g = new THREE.Group();
-  const steel = new THREE.MeshStandardMaterial({ color: 0x9aa4ad, metalness: 0.6, roughness: 0.45, flatShading: true });
-  const build = (x, z, s) => {
-    const p = new THREE.Group(); p.position.set(x, 0, z); p.scale.setScalar(s); g.add(p);
-    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const leg = add(p, new THREE.CylinderGeometry(0.02, 0.03, 1.7, 4), steel, sx * 0.13, 0.82, sz * 0.13);
-      leg.rotation.set(sz * -0.1, 0, sx * 0.1);
-    }
-    for (let i = 0; i < 4; i++) box(p, 0.42 - i * 0.07, 0.025, 0.42 - i * 0.07, steel, 0, 0.3 + i * 0.38, 0);
-    box(p, 1.1, 0.04, 0.06, steel, 0, 1.25, 0);
-    box(p, 0.8, 0.04, 0.06, steel, 0, 1.55, 0);
-    for (const x2 of [-0.52, 0.52, -0.38, 0.38]) add(p, new THREE.SphereGeometry(0.03, 6, 6), glow(0x7dffc8, 2.5), x2, Math.abs(x2) > 0.45 ? 1.2 : 1.5, 0);
-    return p;
-  };
-  build(-0.55, 0, 1);
-  build(0.9, -0.35, 0.75);
-  // Câbles
-  const cable = new THREE.LineBasicMaterial({ color: 0x2a2f36 });
-  for (const [y1, y2, dx] of [[1.2, 0.9, 0.52], [1.5, 1.12, 0.38]]) {
-    for (const s of [-1, 1]) {
-      const a = new THREE.Vector3(-0.55 + s * dx, y1, 0);
-      const b = new THREE.Vector3(0.9 + s * dx * 0.75, y2, -0.35);
-      const m = a.clone().lerp(b, 0.5); m.y -= 0.12;
-      const curve = new THREE.QuadraticBezierCurve3(a, m, b);
-      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(16)), cable));
-    }
-  }
-  // Données reconstituées : petits cubes lumineux
-  const rnd = mulberry32(9);
-  const cubeGeo = new THREE.BoxGeometry(0.07, 0.07, 0.07);
-  const known = glow(0x7dffc8, 2.2), filled = glow(0xffb35a, 2.6);
-  for (let i = 0; i < 26; i++) {
-    const t = i / 25;
-    const x = -1.3 + t * 2.6;
-    const y = 2.1 + Math.sin(t * 9) * 0.18 + (rnd() - 0.5) * 0.06;
-    add(g, cubeGeo, i % 5 === 2 || i % 7 === 4 ? filled : known, x, y, 0.4);
-  }
-  return g;
 }
 
 // Lune-océan avec un galet qui ricoche (TIPE)
@@ -689,5 +398,10 @@ export function createRing(inner, outer, color = 0xc9b8ff, count = 2500) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  return new THREE.Points(geo, new THREE.PointsMaterial({ color, size: 0.18, transparent: true, opacity: 0.75, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const x = c.getContext('2d');
+  const gr = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 32, 32);
+  return new THREE.Points(geo, new THREE.PointsMaterial({ color, size: 0.22, map: new THREE.CanvasTexture(c), transparent: true, opacity: 0.55, depthWrite: false }));
 }

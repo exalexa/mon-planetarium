@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   createSky, createStarfield, createSunMaterial, createCorona, createAtmosphere, createComposer,
+  createAsteroidBelt, createGalaxies,
 } from './effects.js';
-import { createLandmarkMoon } from './models.js';
+import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
 import { TEXTS, GALLERIES } from './content.js';
 
@@ -13,7 +14,7 @@ const byId = Object.fromEntries(BODIES.map((b) => [b.id, b]));
 const SUN_RADIUS = 40;
 // Gravitation (unités de la scène, temps accéléré) : T = 2π √(a³ / GM)
 const GM_SUN = 1480;
-const GM_PLANET = 150;
+const GM_PLANET = 80;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches || location.search.includes('instant');
 
 // ---------------------------------------------------------------------------
@@ -34,12 +35,26 @@ camera.position.set(0, 900, 1600);
 const sky = createSky();
 const stars = createStarfield();
 stars.material.uniforms.uPixelRatio.value = pixelRatio;
+stars.add(createGalaxies());
 scene.add(sky, stars);
 
 // Lumière : le soleil éclaire, la nuit reste bleutée
 const sunLight = new THREE.PointLight(0xffd6a8, 3.2, 0, 0);
 scene.add(sunLight);
-scene.add(new THREE.AmbientLight(0x2a3b66, 0.55));
+scene.add(new THREE.AmbientLight(0x2a3b66, 0.7));
+// Lumière d'appoint très douce portée par la caméra, pour lire les faces de nuit
+const fill = new THREE.DirectionalLight(0x9fb4e0, 0.35);
+fill.position.set(0, 0, 0);
+fill.target.position.set(0, -0.3, -1);
+camera.add(fill, fill.target);
+scene.add(camera);
+
+// Ceintures d'astéroïdes : principale (entre PERSION et SCHOLA) et ceinture glacée au-delà de MUSA
+const belts = [
+  { mesh: createAsteroidBelt({ inner: 166, outer: 194, count: 800, thickness: 5, color: 0x8b7f70, size: [0.3, 1.6], seed: 3 }), r: 180 },
+  { mesh: createAsteroidBelt({ inner: 800, outer: 900, count: 1500, thickness: 26, color: 0x9fb2c4, size: [0.6, 3.4], seed: 8 }), r: 850 },
+];
+belts.forEach((b) => { b.n = Math.sqrt(GM_SUN / b.r ** 3); scene.add(b.mesh); });
 
 const { composer, film } = createComposer(renderer, scene, camera);
 composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -292,8 +307,8 @@ function buildSystem(gltf) {
       }
       b.obj = obj;
     } else if (b.landmark) {
-      b.obj = createLandmarkMoon({ radius: 3, seed: b.moon?.seed, colors: b.moon?.colors, landmark: b.landmark });
-      b.radius = b.radius || 3.4;
+      b.obj = createLandmarkMoon({ radius: 4, seed: b.moon?.seed, colors: b.moon?.colors, ground: b.moon?.ground, landmark: b.landmark });
+      b.radius = b.radius || 4.6;
       b.isLandmark = true;
       scene.add(b.obj);
     } else if (b.build) {
@@ -307,6 +322,7 @@ function buildSystem(gltf) {
     if (b.orbit) prepareOrbit(b.orbit, b.kind === 'planet' ? GM_SUN : GM_PLANET * (b.parent?.mass || 1));
   }
   for (const b of BODIES) if (b.obj && b.kind !== 'star') toonify(b.obj);
+  belts.forEach((b) => { b.mesh.material = toToon(b.mesh.material); });
   // Pickables : parents d'abord, puis enfants attachés (SYLVIA dans PERSION)
   for (const b of BODIES) if (b.obj && !b.attached) tagPickable(b);
   for (const b of BODIES) if (b.obj && b.attached) tagPickable(b);
@@ -318,9 +334,14 @@ function buildSystem(gltf) {
       scene.add(p.orbitLine);
     }
     for (const c of p.children) {
-      if (!c.orbit) continue;
-      c.orbitLine = orbitLine(c.orbit, c.color, 0.22, true);
-      scene.add(c.orbitLine);
+      if (c.orbit) {
+        c.orbitLine = orbitLine(c.orbit, c.color, 0.22, true);
+        scene.add(c.orbitLine);
+      } else if (c.lagrange) {
+        c.orbitLine = haloLine(c.lagrange, c.color);
+        scene.add(c.orbitLine);
+        ensureLagrangeMarker(p, c.lagrange.point);
+      }
     }
   }
 
@@ -331,28 +352,114 @@ function buildSystem(gltf) {
 }
 
 // ---------------------------------------------------------------------------
+// Points de Lagrange L2 / L3 et orbites de halo
+// ---------------------------------------------------------------------------
+// Repère tournant lié au couple soleil–planète : u = radial, w = normale au plan, v = tangentiel
+const LBasis = { u: new THREE.Vector3(), v: new THREE.Vector3(), w: new THREE.Vector3(0, 1, 0), m: new THREE.Matrix4() };
+function rotatingFrame(p) {
+  LBasis.u.copy(p.obj.position).normalize();
+  LBasis.v.crossVectors(LBasis.w, LBasis.u).normalize();
+  return LBasis;
+}
+function lagrangePoint(p, which, out) {
+  const r = p.obj.position.length();
+  const mu = (GM_PLANET * (p.mass || 1)) / GM_SUN;
+  const { u } = rotatingFrame(p);
+  if (which === 'L3') return out.copy(u).multiplyScalar(-r * (1 + (5 * mu) / 12));
+  const rh = r * Math.cbrt(mu / 3);
+  return out.copy(p.obj.position).addScaledVector(u, which === 'L1' ? -rh : rh);
+}
+// Décalage sur l'orbite de halo / Lissajous, exprimé dans le repère tournant (x = u, y = w, z = v)
+function haloLocal(l, phi, out) {
+  return out.set(l.Ax * Math.cos(phi), l.Az * Math.sin((l.wz || 1) * phi + (l.phase ?? Math.PI / 2)), l.Ay * Math.sin(phi));
+}
+function haloLine(l, color) {
+  const pts = [];
+  const loops = (l.wz || 1) === 1 ? 1 : 6;
+  for (let k = 0; k <= 200 * loops; k++) pts.push(haloLocal(l, (k / 200) * Math.PI * 2, new THREE.Vector3()));
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.25, dashSize: 1.2, gapSize: 0.9, depthWrite: false }));
+  line.computeLineDistances();
+  line.matrixAutoUpdate = false;
+  return line;
+}
+function labelSprite(text, color) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+  const x = c.getContext('2d');
+  x.strokeStyle = color; x.lineWidth = 4;
+  x.beginPath(); x.arc(32, 32, 14, 0, Math.PI * 2); x.stroke();
+  x.beginPath(); x.moveTo(32, 8); x.lineTo(32, 56); x.moveTo(8, 32); x.lineTo(56, 32); x.stroke();
+  x.fillStyle = color; x.font = 'bold 34px Nunito, sans-serif'; x.textBaseline = 'middle'; x.fillText(text, 62, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, opacity: 0.8, sizeAttenuation: false }));
+  sp.scale.set(0.07, 0.035, 1);
+  sp.center.set(0.25, 0.5);
+  return sp;
+}
+const lagrangeMarkers = [];
+function ensureLagrangeMarker(p, which) {
+  if (lagrangeMarkers.some((m) => m.p === p && m.which === which)) return;
+  const sprite = labelSprite(which, p.color);
+  // Axe soleil – planète – point de Lagrange
+  const axis = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+    new THREE.LineDashedMaterial({ color: p.color, transparent: true, opacity: 0.18, dashSize: 4, gapSize: 3, depthWrite: false }));
+  axis.frustumCulled = false;
+  scene.add(sprite, axis);
+  lagrangeMarkers.push({ p, which, sprite, axis });
+}
+function updateLagrangeMarkers() {
+  const g = current ? (current.parent || current) : null;
+  for (const m of lagrangeMarkers) {
+    lagrangePoint(m.p, m.which, m.sprite.position);
+    const a = m.axis.geometry.attributes.position;
+    const from = m.which === 'L3' ? m.p.obj.position : new THREE.Vector3(0, 0, 0);
+    a.setXYZ(0, from.x, from.y, from.z);
+    a.setXYZ(1, m.sprite.position.x, m.sprite.position.y, m.sprite.position.z);
+    a.needsUpdate = true;
+    m.axis.computeLineDistances();
+    const show = g === m.p || current?.kind === 'star';
+    m.sprite.material.opacity += ((show ? 0.85 : 0) - m.sprite.material.opacity) * 0.08;
+    m.axis.material.opacity = m.sprite.material.opacity * 0.25;
+    m.sprite.visible = m.axis.visible = m.sprite.material.opacity > 0.02;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Mouvements orbitaux
 // ---------------------------------------------------------------------------
 let simTime = 0;
+const tmpL = new THREE.Vector3();
 function placeBodies(dt) {
   for (const p of SYSTEM) {
     if (p.kind === 'star' || !p.obj) continue;
     p.orbit.M += p.orbit.n * dt;
     keplerPosition(p.orbit, p.obj.position);
     p.atmo?.position.copy(p.obj.position);
-    p.obj.rotation.y += dt * 0.02;
+    // Rotation propre, bien visible depuis la caméra alignée
+    p.obj.rotation.y += dt * 0.06;
     for (const c of p.children) {
       if (!c.obj || c.attached) continue;
-      c.orbit.M += c.orbit.n * dt;
-      keplerPosition(c.orbit, c.obj.position).add(p.obj.position);
+      if (c.lagrange) {
+        // Satellite en orbite de halo autour de L2 / L3
+        const l = c.lagrange;
+        l.phi = (l.phi ?? 0) + ((Math.PI * 2) / l.period) * dt;
+        lagrangePoint(p, l.point, tmpL);
+        const B = rotatingFrame(p);
+        B.m.makeBasis(B.u, B.w, B.v).setPosition(tmpL);
+        c.obj.position.copy(haloLocal(l, l.phi, tmpV).applyMatrix4(B.m));
+        c.orbitLine.matrix.copy(B.m);
+        c.orbitLine.matrixWorldNeedsUpdate = true;
+      } else {
+        c.orbit.M += c.orbit.n * dt;
+        keplerPosition(c.orbit, c.obj.position).add(p.obj.position);
+        c.orbitLine?.position.copy(p.obj.position);
+      }
       if (c.isLandmark) {
-        // Les lunes-monuments présentent leur façade vers le côté éclairé
-        const toSun = tmpV.copy(c.obj.position).negate();
-        c.obj.rotation.y = Math.atan2(toSun.x, toSun.z) + 0.7 + 0.45;
+        // Rotation synchrone : le monument tourne le dos à sa planète, face à la caméra
+        const out = tmpV.copy(c.obj.position).sub(p.obj.position);
+        c.obj.rotation.y = Math.atan2(out.x, out.z) + 0.45;
       } else if (c.spin) {
         c.obj.rotation.y += c.spin * dt;
       }
-      c.orbitLine?.position.copy(p.obj.position);
       c.obj.userData.update?.(simTime);
       c.obj.children.forEach((ch) => ch.userData.update?.(simTime));
     }
@@ -373,39 +480,47 @@ function bodyCenter(b, out = new THREE.Vector3()) {
   return b.obj.localToWorld(out.copy(b.centerLocal || tmpV.set(0, 0, 0)));
 }
 
+const UP = new THREE.Vector3(0, 1, 0);
+// Cadrage : la caméra se place dans l'alignement soleil → planète (ou planète → satellite),
+// un peu en retrait et en hauteur. L'astre n'est pas figé au centre : on vise un point
+// décalé vers son « parent », pour voir à la fois l'astre qui tourne et ce qui l'éclaire ou l'attire.
 function frameFor(b) {
   const center = bodyCenter(b);
+  const portrait = Math.max(1, 1.05 / camera.aspect);
   if (b.kind === 'star') {
     const yaw = 0.55 + user.yaw;
     const pitch = THREE.MathUtils.clamp(0.62 + user.pitch, 0.05, 1.45);
-    const dist = 1500 * user.zoom * Math.max(1, 1.05 / camera.aspect);
+    const dist = 1650 * user.zoom * portrait;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     return { pos: center.clone().addScaledVector(dir, dist), look: center };
   }
   const R = b.viewRadius || 3;
-  let dir;
+  const dist = R * 3.1 * (b.view?.dist || (b.isLandmark ? 0.85 : 1)) * user.zoom * portrait;
   if (b.view?.surface && b.parent) {
     // Vue rasante au-dessus d'un élément posé sur une planète
     const n = center.clone().sub(bodyCenter(b.parent)).normalize();
-    const side = new THREE.Vector3(0, 1, 0).cross(n).normalize();
-    dir = n.clone().multiplyScalar(0.8).addScaledVector(side, 0.45).add(new THREE.Vector3(0, 0.35, 0)).normalize();
-    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), user.yaw);
-  } else {
-    const toSun = center.clone().negate().setY(0).normalize();
-    const yaw = Math.atan2(toSun.x, toSun.z) + 0.7 + user.yaw;
-    const basePitch = b.view?.pitch ?? (b.isLandmark ? 0.6 : b.kind === 'planet' ? 0.3 : 0.35);
-    const pitch = THREE.MathUtils.clamp(basePitch + user.pitch, -1.2, 1.4);
-    dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+    const side = UP.clone().cross(n).normalize();
+    const dir = n.clone().multiplyScalar(0.8).addScaledVector(side, 0.45).add(new THREE.Vector3(0, 0.35, 0)).normalize();
+    dir.applyAxisAngle(UP, user.yaw);
+    return { pos: center.clone().addScaledVector(dir, dist), look: center };
   }
-  // En portrait (mobile), le champ horizontal est étroit : on recule
-  const portrait = Math.max(1, 1.05 / camera.aspect);
-  const dist = R * 3.1 * (b.view?.dist || (b.isLandmark ? 0.8 : 1)) * user.zoom * portrait;
+  // Axe d'alignement : du parent (soleil ou planète) vers l'astre visité
+  const parentPos = b.kind === 'planet' ? new THREE.Vector3() : bodyCenter(b.parent);
+  const u = center.clone().sub(parentPos).setY(0).normalize();
+  const side = UP.clone().cross(u).normalize();
+  const alpha = (b.kind === 'planet' ? 0.85 : 0.6) + user.yaw;
+  const basePitch = b.view?.pitch ?? (b.isLandmark ? 0.5 : b.kind === 'planet' ? 0.26 : 0.3);
+  const pitch = THREE.MathUtils.clamp(basePitch + user.pitch, -1.2, 1.4);
+  const flat = u.clone().multiplyScalar(Math.cos(alpha)).addScaledVector(side, Math.sin(alpha));
+  const dir = flat.multiplyScalar(Math.cos(pitch)).addScaledVector(UP, Math.sin(pitch)).normalize();
   // Pour les lunes-monuments, on vise le bâtiment posé au sommet
-  if (b.isLandmark) center.y += b.obj.userData.topY * 0.8;
-  return { pos: center.clone().addScaledVector(dir, dist), look: center };
+  const focus = center.clone();
+  if (b.isLandmark) focus.y += b.obj.userData.topY * 0.75;
+  const look = focus.clone().addScaledVector(u, -R * (b.kind === 'planet' ? 1.5 : 0.9));
+  return { pos: focus.clone().addScaledVector(dir, dist), look };
 }
 
-const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const smoother = (t) => t * t * t * (t * (t * 6 - 15) + 10);
 function bezier(a, b, c, d, t) {
   const u = 1 - t;
   return a.clone().multiplyScalar(u * u * u)
@@ -414,49 +529,61 @@ function bezier(a, b, c, d, t) {
     .addScaledVector(d, t * t * t);
 }
 
+// Transition : trajectoire courbe et douce, orientation interpolée sans à-coups
 function startTransition(target) {
   const to = frameFor(target).pos;
   const from = camera.position.clone();
   const d = from.distanceTo(to);
-  // Arc : on s'élève, et on contourne le soleil si la trajectoire le traverse
   const seg = to.clone().sub(from);
+  // Contournement du soleil si la ligne droite le frôle
   const t = THREE.MathUtils.clamp(-from.dot(seg) / Math.max(seg.lengthSq(), 1e-6), 0, 1);
   const closest = from.clone().addScaledVector(seg, t);
-  const lift = new THREE.Vector3(0, d * 0.16, 0);
-  const safe = SUN_RADIUS * 2.0;
+  const lift = new THREE.Vector3(0, d * 0.07, 0);
+  const safe = SUN_RADIUS * 2.4;
   if (closest.length() < safe) {
-    const away = closest.lengthSq() > 1 ? closest.clone().normalize() : new THREE.Vector3(0, 1, 0);
-    lift.addScaledVector(away, (safe - closest.length()) * 1.6);
+    const away = closest.lengthSq() > 1 ? closest.clone().normalize() : UP.clone();
+    lift.addScaledVector(away, (safe - closest.length()) * 1.5);
   }
+  // On part dans la direction du regard seulement si la cible est devant
+  const fwd = camera.getWorldDirection(new THREE.Vector3());
+  const ahead = Math.max(0, fwd.dot(seg.clone().normalize()));
   trans = {
-    from, fromLook: look.clone(), lift, t: 0,
-    dur: reduceMotion ? 0.01 : THREE.MathUtils.clamp(1.1 + d / 700, 1.1, 3.0),
+    from, lift, t: 0,
+    qFrom: camera.quaternion.clone(),
+    lead: fwd.multiplyScalar(d * 0.18 * ahead),
+    dur: reduceMotion ? 0.01 : THREE.MathUtils.clamp(2.2 + d / 450, 2.2, 6.5),
   };
 }
 
+const qTmp = new THREE.Quaternion();
+const mTmp = new THREE.Matrix4();
 function updateCamera(dt) {
-  user.yaw += (user.tYaw - user.yaw) * Math.min(1, dt * 8);
-  user.pitch += (user.tPitch - user.pitch) * Math.min(1, dt * 8);
-  user.zoom += (user.tZoom - user.zoom) * Math.min(1, dt * 8);
+  user.yaw += (user.tYaw - user.yaw) * Math.min(1, dt * 6);
+  user.pitch += (user.tPitch - user.pitch) * Math.min(1, dt * 6);
+  user.zoom += (user.tZoom - user.zoom) * Math.min(1, dt * 6);
   const f = frameFor(current);
   let fov = 50;
   if (trans) {
     trans.t = Math.min(1, trans.t + dt / trans.dur);
-    const u = easeInOut(trans.t);
-    const c1 = trans.from.clone().add(trans.lift);
-    const c2 = f.pos.clone().addScaledVector(trans.lift, 0.6);
-    camera.position.copy(bezier(trans.from, c1, c2, f.pos, u));
-    look.copy(trans.fromLook).lerp(f.look, easeInOut(Math.min(1, trans.t * 1.25)));
-    fov = 50 + Math.sin(u * Math.PI) * 7;
+    const s = smoother(trans.t);
+    const c1 = trans.from.clone().add(trans.lead).add(trans.lift);
+    const c2 = f.pos.clone().addScaledVector(trans.lift, 0.5);
+    camera.position.copy(bezier(trans.from, c1, c2, f.pos, s));
+    // Orientation : on glisse de l'orientation de départ vers celle qui vise la cible
+    mTmp.lookAt(camera.position, f.look, UP);
+    qTmp.setFromRotationMatrix(mTmp);
+    camera.quaternion.copy(trans.qFrom).slerp(qTmp, smoother(Math.min(1, trans.t * 1.08)));
+    fov = 50 + Math.sin(s * Math.PI) * 3;
+    look.copy(f.look);
     if (trans.t >= 1) trans = null;
   } else {
     camera.position.copy(f.pos);
     look.copy(f.look);
+    camera.lookAt(look);
   }
-  camera.lookAt(look);
   // Décalage du point de fuite pour laisser l'astre entre le panneau et le journal
-  viewOffset.x += (viewOffset.tx - viewOffset.x) * Math.min(1, dt * 5);
-  viewOffset.y += (viewOffset.ty - viewOffset.y) * Math.min(1, dt * 5);
+  viewOffset.x += (viewOffset.tx - viewOffset.x) * Math.min(1, dt * 3);
+  viewOffset.y += (viewOffset.ty - viewOffset.y) * Math.min(1, dt * 3);
   camera.fov = fov;
   const w = window.innerWidth, h = window.innerHeight;
   camera.setViewOffset(w, h, viewOffset.x, viewOffset.y, w, h);
@@ -492,6 +619,7 @@ function goTo(id) {
   if (first) {
     camera.position.copy(frameFor(b).pos).add(new THREE.Vector3(0, 900, 1400));
     look.set(0, 0, 0);
+    camera.lookAt(look);
   }
   startTransition(b);
   explored.add(b.id);
@@ -718,7 +846,9 @@ function frame() {
     if (current) updateCamera(dt);
     updateLabels();
     updateOrbits();
+    updateLagrangeMarkers();
     updateLoop(dt);
+    belts.forEach((b) => { b.mesh.rotation.y += b.n * dt; });
   }
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
