@@ -1,13 +1,51 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/mon-planetarium/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Portfolio</title>
+    <meta name="description" content="Portfolio d'Axel Mannu Corrieras : physique, ingénierie et arts, à explorer comme un petit système solaire." />
+    <meta name="theme-color" content="#05060c" />
+    <title>Axel Mannu Corrieras · Sys-E139</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
   </head>
   <body>
     <canvas id="bg"></canvas>
+
+    <!-- Écran de chargement : réveil au coin du feu -->
+    <div id="loader" aria-live="polite">
+      <div class="ember"></div>
+      <p class="loader-title">Réveil…</p>
+      <div class="loader-bar"><span id="loader-progress"></span></div>
+      <p class="loader-hint" id="loader-percent">0 %</p>
+    </div>
+
+    <h1 id="planetarium-title">Sys-E139</h1>
+
+    <div id="loop-timer" title="Le soleil est stable. Pour l'instant.">
+      <span class="loop-sun"></span><span class="loop-label">Boucle</span><span id="loop-time">22:00</span>
+    </div>
+
+    <aside id="astro-info-container" aria-live="polite">
+      <div class="panel-body"></div>
+    </aside>
+
+    <nav id="hud-nav" aria-label="Navigation entre les astres">
+      <button type="button" data-nav="up" title="Astre précédent (↑)" aria-label="Astre précédent">▲</button>
+      <button type="button" data-nav="left" title="Satellite précédent (←)" aria-label="Satellite précédent">◀</button>
+      <div id="hud-location">
+        <span id="hud-path">LEXA</span>
+        <span id="hud-section">Accueil</span>
+      </div>
+      <button type="button" data-nav="right" title="Satellite suivant (→)" aria-label="Satellite suivant">▶</button>
+      <button type="button" data-nav="down" title="Astre suivant (↓)" aria-label="Astre suivant">▼</button>
+    </nav>
+
+    <div id="project-overlay" role="dialog" aria-modal="true"></div>
+    <div id="flash"></div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
