@@ -1,902 +1,760 @@
-import './style.css'
-
+import './style.css';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import {
+  createSky, createStarfield, createSunMaterial, createCorona, createAtmosphere, createComposer,
+} from './effects.js';
+import { createLandmarkMoon } from './models.js';
+import { SYSTEM, flattenSystem } from './system.js';
+import { TEXTS, GALLERIES } from './content.js';
 
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+const BODIES = flattenSystem();
+const byId = Object.fromEntries(BODIES.map((b) => [b.id, b]));
+const SUN_RADIUS = 40;
+// Gravitation (unités de la scène, temps accéléré) : T = 2π √(a³ / GM)
+const GM_SUN = 1480;
+const GM_PLANET = 150;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches || location.search.includes('instant');
 
-// Scene
-const scene = new THREE.Scene();
-
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-const renderer = new THREE.WebGLRenderer({
-  canvas: document.querySelector('#bg'),
-});
-
-renderer.setPixelRatio(window.devicePixelRatio);
+// ---------------------------------------------------------------------------
+// Rendu
+// ---------------------------------------------------------------------------
+const canvas = document.querySelector('#bg');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
+renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
-camera.position.set(400,400,200)
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 
-renderer.render(scene, camera);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 30000);
+camera.position.set(0, 900, 1600);
 
-// Geometry
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'; 
-let mixer; // Pour les animations
-const clock = new THREE.Clock();
+const sky = createSky();
+const stars = createStarfield();
+stars.material.uniforms.uPixelRatio.value = pixelRatio;
+scene.add(sky, stars);
 
-// Références des astres
-const astres = [];
-const satellites = {};
-let currentAstreIndex = 0;
-let currentSatelliteIndex = 0; // Commence sur la planète elle-même
+// Lumière : le soleil éclaire, la nuit reste bleutée
+const sunLight = new THREE.PointLight(0xffd6a8, 3.2, 0, 0);
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x2a3b66, 0.55));
 
-// --- Correction portée éruptions solaires ---
-let etoileRef = null;
-let etoileRadius = 80;
-let minOrbitRadius = 100; // sera corrigé dynamiquement
+const { composer, film } = createComposer(renderer, scene, camera);
+composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 
-// --- NOMS DES ASTRES (planètes et satellites) ---
-const astroDisplayNames = {
-  'Etoile': 'LEXA',
-  'Planète_11': 'PERSION',
-  'Roche004': 'PETRA',
-  'Feuilles002': 'SYLVIA',
-  'Planète_2': 'PROXION',
-  'Cube002': 'SIMULX_5',
-  'Cube': 'EXP_//223',
-  'Cube012': 'LOG_EX',
-  'Cube013': 'C4D3X'
+const sunMaterial = createSunMaterial();
+const corona = createCorona(SUN_RADIUS * 5);
+scene.add(corona);
+
+// ---------------------------------------------------------------------------
+// Interface
+// ---------------------------------------------------------------------------
+const ui = {
+  loader: document.getElementById('loader'),
+  loaderBar: document.getElementById('loader-progress'),
+  loaderPct: document.getElementById('loader-percent'),
+  title: document.getElementById('planetarium-title'),
+  panel: document.getElementById('astro-info-container'),
+  panelBody: document.querySelector('#astro-info-container .panel-body'),
+  nav: document.getElementById('hud-nav'),
+  path: document.getElementById('hud-path'),
+  section: document.getElementById('hud-section'),
+  timer: document.getElementById('loop-timer'),
+  time: document.getElementById('loop-time'),
+  overlay: document.getElementById('project-overlay'),
+  flash: document.getElementById('flash'),
 };
 
-// --- LABELS 3D AU-DESSUS DES ASTRES ---
-const astroLabels = {};
-function createAstroLabel(name) {
-  const label = document.createElement('div');
-  label.className = 'astro-label';
-  label.innerText = astroDisplayNames[name] || name;
-  label.style.position = 'fixed';
-  label.style.pointerEvents = 'none';
-  label.style.fontFamily = '"Share Tech Mono", "Fira Mono", monospace';
-  label.style.fontSize = '2.1rem';
-  label.style.fontWeight = 'bold';
-  label.style.letterSpacing = '0.08em';
-  label.style.color = '#fff';
-  label.style.textShadow = '0 0 18px rgb(127, 62, 143), 0 0 8px #fff, 0 2px 8px #0ff, 0 0 32px #0ff8';
-  label.style.filter = 'drop-shadow(0 0 8px rgb(127, 62, 143))';
-  label.style.opacity = '0';
-  label.style.transition = 'opacity 0.4s';
-  label.style.zIndex = '1003';
-  label.style.textAlign = 'center';
-  label.style.userSelect = 'none';
-  document.body.appendChild(label);
-  return label;
+// --- Arbre d'exploration (journal de bord) ---
+const EXPLORED_KEY = 'sysE139.explored';
+let explored = new Set();
+try { explored = new Set(JSON.parse(localStorage.getItem(EXPLORED_KEY) || '[]')); } catch (e) { /* stockage indisponible */ }
+function saveExplored() {
+  try { localStorage.setItem(EXPLORED_KEY, JSON.stringify([...explored])); } catch (e) { /* ignore */ }
 }
 
-// Création des labels pour chaque astre et satellite
-['Etoile','Planète_11','Roche004','Feuilles002','Planète_2','Cube002','Cube','Cube012','Cube013'].forEach(name => {
-  astroLabels[name] = createAstroLabel(name);
+const tree = document.createElement('aside');
+tree.id = 'explore-tree';
+tree.innerHTML = `
+  <button type="button" class="tree-toggle" aria-expanded="false" aria-controls="explore-tree-list">Journal</button>
+  <div class="tree-inner">
+    <header class="tree-head">
+      <span class="tree-title">Journal de bord</span>
+      <span class="tree-count"><b id="tree-done">0</b>/<span id="tree-total">0</span></span>
+    </header>
+    <div class="tree-progress"><span id="tree-bar"></span></div>
+    <ul class="tree-list" id="explore-tree-list"></ul>
+    <button type="button" class="tree-reset" title="Effacer la progression">réinitialiser</button>
+  </div>`;
+document.body.appendChild(tree);
+const treeList = tree.querySelector('.tree-list');
+const chips = {};
+function chip(b) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = `chip chip-${b.kind}`;
+  el.style.setProperty('--c', b.color);
+  el.dataset.id = b.id;
+  el.innerHTML = `<span class="chip-led"></span><span class="chip-name">${b.name}</span><span class="chip-sec">${b.section}</span><span class="chip-state"></span>`;
+  el.addEventListener('click', () => { goTo(b.id); tree.classList.remove('open'); });
+  chips[b.id] = el;
+  return el;
+}
+for (const p of SYSTEM) {
+  const li = document.createElement('li');
+  li.className = 'tree-node';
+  li.style.setProperty('--c', p.color);
+  li.dataset.id = p.id;
+  li.appendChild(chip(p));
+  if (p.children.length) {
+    const ul = document.createElement('ul');
+    ul.className = 'tree-moons';
+    for (const c of p.children) {
+      const cli = document.createElement('li');
+      cli.appendChild(chip(c));
+      ul.appendChild(cli);
+    }
+    li.appendChild(ul);
+  }
+  treeList.appendChild(li);
+}
+tree.querySelector('.tree-toggle').addEventListener('click', () => {
+  const open = tree.classList.toggle('open');
+  tree.querySelector('.tree-toggle').setAttribute('aria-expanded', String(open));
 });
+tree.querySelector('.tree-reset').addEventListener('click', () => {
+  explored = new Set([current?.id].filter(Boolean));
+  saveExplored();
+  updateTree();
+});
+document.getElementById('tree-total').textContent = BODIES.length;
 
-// --- PARAMÈTRES DE ROTATION ET RÉVOLUTION ---
-// Périodes en secondes (modifiable dynamiquement)
-const planetMotionParams = {
-  // Planète 1.1 (PERSION)
-  T11: 52, // Révolution autour de l'étoile (en s)
-  t11: 12,  // Rotation sur elle-même (en s)
-  // Planète 2 (PROXION)
-  T21: 68, // Révolution autour de l'étoile
-  t21: 24, // Rotation sur elle-même
-  // Roche (PETRA)
-  T12: 15,  // Révolution autour de Planète 1.1
-  t12: 15,  // Rotation sur elle-même
-  // Cube (EXP_//223)
-  T22: 18,  // Révolution autour de l'étoile (allongé)
-  t22: 2.5, // Rotation sur elle-même
-  // Cube002 (SIMULX_5)
-  T23: 28, // Révolution autour de l'étoile (allongé)
-  t23: 4,  // Rotation sur elle-même
-  // Cube012
-  T24: 36, // Révolution autour de Proxia
-  t24: 3.5, // Rotation sur elle-même
-  // Cube013
-  T25: 44, // Révolution autour de Proxia
-  t25: 5.5  // Rotation sur elle-même
-};
-// --- STOCKAGE DES ANGLES ORBITAUX ---
-const planetMotionState = {
-  theta11: 0, theta21: 0, theta12: 0, theta22: 0, theta23: 0, theta24: 0, theta25: 0,
-  rot11: 0, rot21: 0, rot12: 0, rot22: 0, rot23: 0, rot24: 0, rot25: 0
-};
-let lastAnimTime = performance.now();
+function updateTree() {
+  const group = current ? (current.parent || current) : null;
+  for (const b of BODIES) {
+    const el = chips[b.id];
+    el.classList.toggle('current', b === current);
+    el.classList.toggle('explored', explored.has(b.id));
+    const state = el.querySelector('.chip-state');
+    state.classList.toggle('unknown', !explored.has(b.id));
+    if (!explored.has(b.id)) state.textContent = '?';
+    else if (b.children && b.children.length) state.textContent = `${b.children.filter((c) => explored.has(c.id)).length}/${b.children.length}`;
+    else state.textContent = '✓';
+  }
+  treeList.querySelectorAll('.tree-node').forEach((li) => li.classList.toggle('open', group && li.dataset.id === group.id));
+  const n = BODIES.filter((b) => explored.has(b.id)).length;
+  document.getElementById('tree-done').textContent = n;
+  document.getElementById('tree-bar').style.width = `${(100 * n) / BODIES.length}%`;
+}
 
-// --- CALCUL DES RAYONS ORBITAUX DYNAMIQUES (après chargement GLB) ---
-let r1 = 180, r2 = 320, r12 = 38, r22 = 38, r23 = 60, r24 = 48, r25 = 54; // valeurs par défaut
+// --- Étiquettes 3D ---
+for (const b of BODIES) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'astro-label';
+  el.style.setProperty('--c', b.color);
+  el.textContent = b.name;
+  el.tabIndex = -1;
+  el.addEventListener('click', () => goTo(b.id));
+  document.body.appendChild(el);
+  b.label = el;
+}
 
-let isModelLoaded = false;
+// ---------------------------------------------------------------------------
+// Mécanique céleste : orbites képlériennes
+// ---------------------------------------------------------------------------
+function prepareOrbit(o, GM) {
+  o.T = 2 * Math.PI * Math.sqrt((o.a ** 3) / GM);
+  o.n = (2 * Math.PI) / o.T;
+  o.M = o.M0 || 0;
+  const deg = Math.PI / 180;
+  o.q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.node || 0)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (o.i || 0) * deg))
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.peri || 0));
+}
+// Position sur l'ellipse à partir de l'anomalie excentrique E
+function ellipsePoint(o, E, out) {
+  return out.set(o.a * (Math.cos(E) - o.e), 0, -o.a * Math.sqrt(1 - o.e * o.e) * Math.sin(E)).applyQuaternion(o.q);
+}
+// Résolution de l'équation de Kepler M = E − e sin E (Newton)
+function keplerPosition(o, out) {
+  let E = o.M;
+  for (let k = 0; k < 6; k++) E -= (E - o.e * Math.sin(E) - o.M) / (1 - o.e * Math.cos(E));
+  return ellipsePoint(o, E, out);
+}
+function orbitLine(o, color, opacity, dashed) {
+  const pts = [];
+  for (let k = 0; k <= 256; k++) pts.push(ellipsePoint(o, (k / 256) * Math.PI * 2, new THREE.Vector3()));
+  const geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  const material = dashed
+    ? new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: o.a * 0.05, gapSize: o.a * 0.04, depthWrite: false })
+    : new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  const line = new THREE.Line(geometry, material);
+  if (dashed) line.computeLineDistances();
+  return line;
+}
 
-const loader = new GLTFLoader();
-loader.load(import.meta.env.BASE_URL + 'Planetarium.glb', function (gltf) {
-  scene.add(gltf.scene);
-  gltf.scene.position.set(0, 0, 0);
+// ---------------------------------------------------------------------------
+// Matériaux cartoon : ombrage en paliers doux + léger liseré de lumière
+// ---------------------------------------------------------------------------
+const gradientMap = (() => {
+  const t = new THREE.DataTexture(new Uint8Array([46, 92, 150, 205, 240, 255]), 6, 1, THREE.RedFormat);
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = false;
+  t.needsUpdate = true;
+  return t;
+})();
+const toonCache = new Map();
+function toToon(m) {
+  if (!m || !(m.isMeshStandardMaterial || m.isMeshPhysicalMaterial || m.isMeshLambertMaterial)) return m;
+  if (toonCache.has(m)) return toonCache.get(m);
+  const t = new THREE.MeshToonMaterial({
+    name: m.name, color: m.color.clone(), map: m.map, vertexColors: m.vertexColors,
+    emissive: m.emissive.clone(), emissiveIntensity: m.emissiveIntensity, emissiveMap: m.emissiveMap,
+    transparent: m.transparent, opacity: m.opacity, side: m.side, gradientMap,
+  });
+  // Les métaux deviennent des aplats un peu plus clairs (pas de reflets réalistes)
+  if (m.metalness > 0.4) t.color.offsetHSL(0, -0.05, 0.08);
+  t.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      `float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+       outgoingLight += vec3(0.62, 0.72, 1.0) * rim * 0.22;
+       #include <opaque_fragment>`
+    );
+  };
+  toonCache.set(m, t);
+  return t;
+}
+function toonify(root) {
+  root.traverse((o) => {
+    if (!o.isMesh || o === byId.lexa?.obj) return;
+    o.material = Array.isArray(o.material) ? o.material.map(toToon) : toToon(o.material);
+  });
+}
 
+// ---------------------------------------------------------------------------
+// Construction du système
+// ---------------------------------------------------------------------------
+const tmpV = new THREE.Vector3();
+const tmpBox = new THREE.Box3();
+const tmpSphere = new THREE.Sphere();
+const pickables = [];
+let ready = false;
 
-  // Debug : Affiche tous les noms d'objets du gltf.scene
-  gltf.scene.traverse(obj => {
-    if (obj.name) {
-      console.log('Nom trouvé dans gltf.scene :', obj.name);
+function measure(b) {
+  b.obj.updateMatrixWorld(true);
+  tmpBox.setFromObject(b.obj);
+  tmpBox.getBoundingSphere(tmpSphere);
+  b.centerLocal = b.obj.worldToLocal(tmpSphere.center.clone());
+  b.viewRadius = b.view?.radius || b.radius || tmpSphere.radius;
+}
+
+function tagPickable(b) {
+  b.obj.traverse((o) => {
+    if (o.isMesh || o.isPoints) {
+      o.userData.bodyId = b.id;
+      if (!pickables.includes(o)) pickables.push(o);
     }
   });
-
-  // Récupération des objets par leur nom (corrigé selon la liste affichée)
-  const etoile = gltf.scene.getObjectByName('Etoile');
-  const planete1 = gltf.scene.getObjectByName('Planète_11');
-  const planete2 = gltf.scene.getObjectByName('Planète_2');
-  const roche = gltf.scene.getObjectByName('Roche004');
-  const feuilles = gltf.scene.getObjectByName('Feuilles002');
-  const cube = gltf.scene.getObjectByName('Cube002');
-  const cube2 = gltf.scene.getObjectByName('Cube');
-  const cube012 = gltf.scene.getObjectByName('Cube012');
-  const cube013 = gltf.scene.getObjectByName('Cube013');
-
-  // Calcul dynamique des rayons orbitaux à partir des positions initiales du GLB
-  if (etoile && planete1) {
-    r1 = etoile.position.distanceTo(planete1.position);
-  }
-  if (etoile && planete2) {
-    r2 = etoile.position.distanceTo(planete2.position);
-  }
-  if (planete1 && roche) {
-    r12 = planete1.position.distanceTo(roche.position);
-  }
-  if (planete2 && cube) {
-    r22 = planete2.position.distanceTo(cube.position);
-  }
-  if (planete2 && cube2) {
-    r23 = planete2.position.distanceTo(cube2.position);
-  }
-  if (planete2 && cube012) {
-    r24 = planete2.position.distanceTo(cube012.position);
-  }
-  if (planete2 && cube013) {
-    r25 = planete2.position.distanceTo(cube013.position);
-  }
-
-  // Astres principaux (ordre de navigation)
-  astres.push(etoile, planete1, planete2);
-  // Pour chaque astre (planète), la liste satellites inclut la planète elle-même en premier
-  satellites[0] = [etoile]; // étoile n'a pas de satellites
-  satellites[1] = [planete1, roche, feuilles]; // planète 1 et ses satellites (roche, feuilles)
-  satellites[2] = [planete2, cube, cube2, cube012, cube013]; // planète 2 et ses satellites
-
-  focusOnAstre();
-
-  // Stocker la référence de l'étoile pour les éruptions
-  etoileRef = etoile;
-  etoileRadius = 80;
-  if (etoile && etoile.geometry && etoile.geometry.boundingSphere) {
-    etoileRadius = etoile.geometry.boundingSphere.radius;
-  }
-  // Calcul du rayon minimal de sécurité (rayon étoile + marge)
-  minOrbitRadius = etoileRadius * 1.12; // 12% de marge
-  isModelLoaded = true;
-}, undefined, function (error) {
-  console.error(error);
-});
-
-// Smooth camera transition
-const CAMERA_SMOOTH_DURATION = 1.1;
-let cameraSmoothT = 1;
-let cameraStartPos = camera.position.clone();
-let cameraStartLookAt = new THREE.Vector3();
-let targetCameraPosition = camera.position.clone();
-let targetLookAt = new THREE.Vector3();
-let cameraTransitionMode = 'linear'; // 'linear', 'backward', 'zoomout'
-let cameraZoomOutPos = null;
-
-function getCameraForward() {
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  return dir.normalize();
 }
 
-function computeArcParamsSimple(start, end, focus) {
-  // Arc de cercle simple : centre = barycentre (start+end+focus)/3, rayon = distance au centre
-  // Mais on n'utilise l'arc que si la distance à l'étoile est inférieure à un certain seuil
-  const distToFocus = (start.distanceTo(focus) + end.distanceTo(focus)) / 2;
-  const distStartEnd = start.distanceTo(end);
-  // On n'utilise l'arc que si on est proche de l'étoile (ex : navigation étoile <-> planète)
-  if (distToFocus < 1.5 * distStartEnd) {
-    const center = focus.clone().add(start).add(end).multiplyScalar(1/3);
-    const radius = center.distanceTo(start);
-    const normal = start.clone().sub(center).cross(end.clone().sub(center)).normalize();
-    return { center, radius, normal };
-  }
-  return null;
-}
+function buildSystem(gltf) {
+  const g = gltf.scene;
+  g.updateMatrixWorld(true);
 
-function slerpOnArc(center, radius, start, end, normal, t) {
-  // Interpolation sphérique sur l'arc de cercle
-  const vStart = start.clone().sub(center).normalize();
-  const vEnd = end.clone().sub(center).normalize();
-  const angle = vStart.angleTo(vEnd);
-  const axis = normal;
-  const quat = new THREE.Quaternion().setFromAxisAngle(axis, angle * t);
-  const v = vStart.clone().applyQuaternion(quat).multiplyScalar(radius);
-  return center.clone().add(v);
-}
+  // Le soleil : sphère lisse et matériau animé
+  const etoile = g.getObjectByName('Etoile');
+  [...etoile.children].forEach((c) => scene.attach(c));
+  scene.attach(etoile);
+  etoile.geometry = new THREE.SphereGeometry(1, 96, 64);
+  etoile.material = sunMaterial;
+  etoile.position.set(0, 0, 0);
+  etoile.rotation.set(0, 0, 0);
+  etoile.scale.setScalar(SUN_RADIUS);
 
-// Ajout d'un conteneur pour les textes d'astres
-const infoContainer = document.createElement('div');
-infoContainer.id = 'astro-info-container';
-infoContainer.style.position = 'absolute';
-infoContainer.style.top = '30px';
-infoContainer.style.left = '30px';
-infoContainer.style.zIndex = '10';
-infoContainer.style.maxWidth = '600px';
-infoContainer.style.maxHeight = '600px';
-infoContainer.style.overflowY = 'auto';
-infoContainer.style.background = 'rgba(0,0,0,0.7)';
-infoContainer.style.color = '#fff';
-infoContainer.style.padding = '16px';
-infoContainer.style.borderRadius = '12px';
-infoContainer.style.display = 'none';
-infoContainer.style.transition = 'opacity 0.5s cubic-bezier(.4,2,.6,1), transform 0.5s cubic-bezier(.4,2,.6,1)';
-infoContainer.style.opacity = '0';
-infoContainer.style.transform = 'translateY(20px)';
-document.body.appendChild(infoContainer);
+  // Fusée de PROXION : on retire une pièce égarée loin du modèle
+  const rocket = g.getObjectByName('Rocket') || scene.getObjectByName('Rocket');
+  rocket?.traverse((o) => {
+    if (o.isMesh && o.material?.name === 'Matériau.007') o.userData.remove = true;
+  });
+  rocket && [...rocket.children].filter((o) => o.userData.remove).forEach((o) => o.parent.remove(o));
 
-// Overlay pour affichage projet (modale)
-const projectOverlay = document.createElement('div');
-projectOverlay.id = 'project-overlay';
-projectOverlay.style.position = 'fixed';
-projectOverlay.style.top = '0';
-projectOverlay.style.left = '0';
-projectOverlay.style.width = '100vw';
-projectOverlay.style.height = '100vh';
-projectOverlay.style.background = 'rgba(0,0,0,0.92)';
-projectOverlay.style.display = 'none';
-projectOverlay.style.zIndex = '1000';
-projectOverlay.style.justifyContent = 'center';
-projectOverlay.style.alignItems = 'center';
-projectOverlay.style.flexDirection = 'column';
-projectOverlay.style.transition = 'opacity 0.4s';
-// Variable globale pour savoir si un overlay projet est ouvert
-let isProjectOverlayOpen = false;
-// On affiche dynamiquement le contenu selon le projet
-function showProjectOverlay(type) {
-  let html = '';
-  if (type === 'sim3d') {
-    html = `
-      <div style="max-width:1200px;width:96vw;padding:40px 32px 32px 32px;background:#181818;border-radius:22px;box-shadow:0 8px 32px #000a;color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;">
-        <h2 style="margin-top:0">Jumeau numérique de presse à injecter</h2>
-        <div id="project-photos" style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;">
-          <img src="${import.meta.env.BASE_URL}sim3d_1.jpg.png" alt="Capture 1" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="${import.meta.env.BASE_URL}sim3d_2.jpg.png" alt="Capture 2" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="${import.meta.env.BASE_URL}sim3d_3.jpg.png" alt="Capture 3" style="max-width:340px;max-height:420px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-        </div>
-        <button id="close-project-overlay" style="margin-top:8px;padding:12px 38px;font-size:1.2em;background:#fff;color:#222;border:none;border-radius:10px;cursor:pointer;">Retour</button>
-      </div>
-    `;
-  } else if (type === 'expo') {
-    html = `
-      <div style="max-width:1200px;width:96vw;padding:40px 32px 32px 32px;background:#181818;border-radius:22px;box-shadow:0 8px 32px #000a;color:#fff;position:relative;display:flex;flex-direction:column;align-items:center;">
-        <h2 style="margin-top:0">Exposition photo</h2>
-        <div id="project-photos" style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;">
-          <img src="${import.meta.env.BASE_URL}expo_1.jpg.png" alt="Photo expo 1" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-          <img src="${import.meta.env.BASE_URL}expo_2.jpg.png" alt="Photo expo 2" style="max-width:420px;max-height:520px;border-radius:12px;box-shadow:0 2px 16px #0008;">
-        </div>
-        <button id="close-project-overlay" style="margin-top:8px;padding:12px 38px;font-size:1.2em;background:#fff;color:#222;border:none;border-radius:10px;cursor:pointer;">Retour</button>
-      </div>
-    `;
-  }
-  projectOverlay.innerHTML = html;
-  projectOverlay.style.display = 'flex';
-  setTimeout(() => { projectOverlay.style.opacity = '1'; }, 10);
-  isProjectOverlayOpen = true;
-  updateAstroLabels(true); // force le masquage de tous les labels
-}
-function closeProjectOverlay() {
-  projectOverlay.style.opacity = '0';
-  setTimeout(() => { projectOverlay.style.display = 'none'; }, 400);
-  isProjectOverlayOpen = false;
-  // Réafficher le label du focus après la fermeture
-  setTimeout(() => { updateAstroLabels(); }, 420);
-}
-document.body.appendChild(projectOverlay);
-
-document.addEventListener('click', (e) => {
-  if (e.target && e.target.id === 'voir-projet-sim3d') {
-    showProjectOverlay('sim3d');
-  }
-  if (e.target && e.target.id === 'voir-projet-expo') {
-    showProjectOverlay('expo');
-  }
-  if (e.target && e.target.id === 'close-project-overlay') {
-    closeProjectOverlay();
-  }
-});
-
-// Ajout du titre Planétarium centré en haut avec effet glow
-const planetariumTitle = document.createElement('div');
-planetariumTitle.id = 'planetarium-title';
-planetariumTitle.innerText = 'Sys-E139';
-planetariumTitle.style.position = 'fixed';
-planetariumTitle.style.top = '32px';
-planetariumTitle.style.left = '50%';
-planetariumTitle.style.transform = 'translateX(-50%)';
-planetariumTitle.style.fontFamily = 'Montserrat, Arial, sans-serif';
-planetariumTitle.style.fontWeight = '900';
-planetariumTitle.style.fontSize = 'clamp(2.8rem, 7vw, 5.2rem)';
-planetariumTitle.style.letterSpacing = '0.08em';
-planetariumTitle.style.color = '#fff';
-planetariumTitle.style.textShadow = '0 0 32px rgba(51, 6, 49, 0.31), 0 0 12px #fff, 0 2px 8px rgb(40, 19, 41), 0 0 80px rgba(48, 36, 47, 0.53)';
-planetariumTitle.style.zIndex = '900'; // Doit être inférieur à l'overlay (1000)
-planetariumTitle.style.userSelect = 'none';
-planetariumTitle.style.pointerEvents = 'none';
-planetariumTitle.style.textAlign = 'center';
-planetariumTitle.style.filter = 'drop-shadow(0 0 18px rgb(34, 6, 39))';
-planetariumTitle.style.display = 'none'; // Par défaut masqué
-
-document.body.appendChild(planetariumTitle);
-
-function updatePlanetariumTitle() {
-  if (currentAstreIndex === 0) {
-    planetariumTitle.style.display = 'block';
-  } else {
-    planetariumTitle.style.display = 'none';
-  }
-}
-
-// Textes HTML riches pour chaque objet (astre ou satellite)
-const astroTexts = {
-  'Etoile': `<h2>Bienvenue sur mon Planétarium !</h2><p>Utilisez les <b>flèches directionnelles</b> pour naviguer entre les astres et satellites.<br>Chaque planète ou satellite représente une facette de mon parcours ou de mes projets.<br><br><i>⭣/⭡</i> : changer d'astre principal<br><i>⭠/⭢</i> : naviguer entre planète et satellites<br><br>Bonne visite !</p>`,
-  'Planète_11': `<div style="display:flex;align-items:flex-start;"><img src="${import.meta.env.BASE_URL}perso_1.jpg" alt="Axel Mannu Corrieras" style="margin:0 18px 0 0;max-width:110px;border-radius:14px;box-shadow:0 2px 12px #0008;flex-shrink:0;" /><div><h2>Axel Mannu Corrieras</h2><p><a href="https://www.linkedin.com/in/axel-mannu-corrieras-6b4449284/" target="_blank" rel="noopener">linkedin</a><p><p>Élève en école d'ingénierie.<p><p>Passionné par les arts et les sciences,<br>Ici, vous pourrez en découvrir plus sur mon parcours et mes centres d'intérêt.</p></div></div>`,
-  'Roche004': `<h2>Formation & Diplômes</h2><ul><li>2024-2027 : Arts et Métiers ParisTech (ENSAM) – Ingénieur généraliste</li><li>2022-2024 : CPGE PCSI-PC* – Lycée Pierre Corneille, Rouen</li><li>2022 : Baccalauréat Scientifique – Mention TB</li><li>2020 : Brevet Initiation Aéronautique - Mention TB</li></ul>`,
-  'Feuilles002': `<h2>Centres d'intérêt</h2><ul><li>Astrophysique, astronomie, physique</li><li>Photographie, astrophoto, argentique : <a href="https://www.instagram.com/axelcorrieras/" target="_blank" rel="noopener">insta</a></li><li>Piano --- 11 années au CRR Rouen</li><li>Composition musicale : <a href="https://soundcloud.com/user-163788646-509251636" target="_blank" rel="noopener">soundcloud</a></li><li>Poésie [symbolisme, romantisme, haïkaï]</li><li>Arts martiaux : Iaido, Iaijutsu, Kenjutsu</li></ul>`,
-  'Planète_2': `<h2>Projets</h2><p>Explorez mes réalisations, projets scolaires et initiatives personnelles,<br>en parcourant les différents satellites.</p>`,
-  'Cube002': `<h2>Simulateur 3D</h2><p>Développement d'un jumeau numérique d'une presse à injection plastique, de la CAO au rendu VR en passant par l'animation des différentes étapes du processus.<br><a href='#' id='voir-projet-sim3d'>Voir le projet</a></p>`,
-  'Cube': `<h2>Exposition</h2><p>Réalisation d'une exposition de photographie argentique à la galerie l'Embrasser, Paris.<br><a href='#' id='voir-projet-expo'>Voir l'expo photo</a></p>`,
-  'Cube012': `<h2>Tutorat</h2><p><li>Tutorat : <b>Mathématiques</b> (Lycéens), <b><a href="https://artsetmetiers.fr/fr/actualites/campus-de-cluny-cordee-de-la-reussite-optim-avec-axel-mannu" target="_blank" rel="noopener">OPTIM</b></a>, et <b>Piano</b></li><li>Participation à un concours d'éloquence : <a href="https://www.youtube.com/watch?v=_RCy0VlvdUQ&list=PLTTBdPeOTS-h5duX9-Byo_IA9M5DWnXqG&index=8" target="_blank" rel="noopener">vidéo</a></li></p>`,
-  'Cube013': `<h2>Info</h2><p><b>Réalisation de plusieurs projets informatiques :</b><li>Bibliothèque de divertissement local : scan automatiquement les fichiers et récupère les informations via des bases de données </li><li>Réalisation de ce portfolio</li></p>`
-};
-
-// Placement configurable pour chaque objet (top/left en px)
-const astroTextPositions = {
-  'Etoile': { top: '30px', left: '30px' },
-  'Planète_11': { top: '30px', left: '30px' },
-  'Roche004': { top: 'auto', left: '30px', bottom: '30px' },
-  'Feuilles002': { top: 'auto', left: '50%', bottom: '30px', transform: 'translateX(-50%)' },
-  'Planète_2': { top: '30px', right: '30px', left: 'auto' },
-  'Cube002': { top: 'auto', right: '30px', bottom: '30px', left: 'auto' },
-  'Cube': { top: 'auto', left: '50%', bottom: '30px', transform: 'translateX(-50%)' },
-  'Cube012': { top: 'auto', right: '30px', bottom: '120px', left: 'auto' },
-  'Cube013': { top: 'auto', left: '50%', bottom: '120px', transform: 'translateX(-50%)' }
-};
-
-// Animation d'apparition/disparition
-let lastAstroText = '';
-let hackerAnimTimeout = null;
-
-// Fonction utilitaire pour effet hacker sur texte HTML riche
-function animateHackerText(html, container, duration = 1100, interval = 18) {
-  if (hackerAnimTimeout) clearTimeout(hackerAnimTimeout);
-  container.innerHTML = '';
-  // Découper le HTML en tokens (balises ou caractères)
-  const tokens = [];
-  let i = 0;
-  while (i < html.length) {
-    if (html[i] === '<') {
-      // Balise HTML
-      const close = html.indexOf('>', i);
-      if (close !== -1) {
-        tokens.push({ type: 'tag', value: html.slice(i, close + 1) });
-        i = close + 1;
-      } else {
-        tokens.push({ type: 'char', value: html[i] });
-        i++;
+  for (const b of BODIES) {
+    if (b.glb) {
+      const obj = g.getObjectByName(b.glb) || scene.getObjectByName(b.glb);
+      if (!obj) { console.warn('Objet introuvable dans le GLB :', b.glb); continue; }
+      if (!b.attached && b.kind !== 'star') {
+        scene.attach(obj);
+        obj.scale.multiplyScalar(b.glbScale || 1);
       }
-    } else {
-      tokens.push({ type: 'char', value: html[i] });
-      i++;
+      b.obj = obj;
+    } else if (b.landmark) {
+      b.obj = createLandmarkMoon({ radius: 3, seed: b.moon?.seed, colors: b.moon?.colors, landmark: b.landmark });
+      b.radius = b.radius || 3.4;
+      b.isLandmark = true;
+      scene.add(b.obj);
+    } else if (b.build) {
+      b.obj = b.build();
+      scene.add(b.obj);
+    }
+    if (b.atmosphere) {
+      b.atmo = createAtmosphere(b.atmosphere.radius, b.atmosphere.color, { shell: b.atmosphere.shell });
+      scene.add(b.atmo);
+    }
+    if (b.orbit) prepareOrbit(b.orbit, b.kind === 'planet' ? GM_SUN : GM_PLANET * (b.parent?.mass || 1));
+  }
+  for (const b of BODIES) if (b.obj && b.kind !== 'star') toonify(b.obj);
+  // Pickables : parents d'abord, puis enfants attachés (SYLVIA dans PERSION)
+  for (const b of BODIES) if (b.obj && !b.attached) tagPickable(b);
+  for (const b of BODIES) if (b.obj && b.attached) tagPickable(b);
+
+  // Trajectoires elliptiques
+  for (const p of SYSTEM) {
+    if (p.orbit) {
+      p.orbitLine = orbitLine(p.orbit, p.color, 0.2, false);
+      scene.add(p.orbitLine);
+    }
+    for (const c of p.children) {
+      if (!c.orbit) continue;
+      c.orbitLine = orbitLine(c.orbit, c.color, 0.22, true);
+      scene.add(c.orbitLine);
     }
   }
-  // Indices des caractères à révéler (on ignore les balises)
-  const charIndices = tokens.map((t, idx) => t.type === 'char' ? idx : null).filter(idx => idx !== null);
-  const totalChars = charIndices.length;
-  const startTime = performance.now();
-  const randomChars = 'Ա Զ Է Ր Ե Ը Ի Ո Պ Խ Դ Ֆ Ք Հ Ճ Կ Լ Մ Ւ Ց Գ Վ Բ Ն ಐ ಓ ಔ ಕ ಖ ಗ ಘ ಙ ಝ ಞ ಲ ಶ ಹ ೀ ಾ ಿ ಧಿ ೈ ೋ ೌ ೬ ೂ ೄ';
 
-  function render(progress) {
-    let revealed = Math.floor(progress * totalChars);
-    let htmlOut = '';
-    let revealedCount = 0;
-    for (let t = 0; t < tokens.length; t++) {
-      if (tokens[t].type === 'tag') {
-        htmlOut += tokens[t].value;
-      } else {
-        if (revealedCount < revealed) {
-          htmlOut += tokens[t].value;
-        } else {
-          // Caractère aléatoire
-          htmlOut += randomChars[Math.floor(Math.random() * randomChars.length)];
-        }
-        revealedCount++;
+  placeBodies(0);
+  for (const b of BODIES) if (b.obj) measure(b);
+  byId.lexa.viewRadius = SUN_RADIUS;
+  ready = true;
+}
+
+// ---------------------------------------------------------------------------
+// Mouvements orbitaux
+// ---------------------------------------------------------------------------
+let simTime = 0;
+function placeBodies(dt) {
+  for (const p of SYSTEM) {
+    if (p.kind === 'star' || !p.obj) continue;
+    p.orbit.M += p.orbit.n * dt;
+    keplerPosition(p.orbit, p.obj.position);
+    p.atmo?.position.copy(p.obj.position);
+    p.obj.rotation.y += dt * 0.02;
+    for (const c of p.children) {
+      if (!c.obj || c.attached) continue;
+      c.orbit.M += c.orbit.n * dt;
+      keplerPosition(c.orbit, c.obj.position).add(p.obj.position);
+      if (c.isLandmark) {
+        // Les lunes-monuments présentent leur façade vers le côté éclairé
+        const toSun = tmpV.copy(c.obj.position).negate();
+        c.obj.rotation.y = Math.atan2(toSun.x, toSun.z) + 0.7 + 0.45;
+      } else if (c.spin) {
+        c.obj.rotation.y += c.spin * dt;
       }
-    }
-    container.innerHTML = htmlOut;
-  }
-
-  function step() {
-    const now = performance.now();
-    const elapsed = now - startTime;
-    const progress = Math.min(1, elapsed / duration);
-    render(progress);
-    if (progress < 1) {
-      hackerAnimTimeout = setTimeout(step, interval);
-    } else {
-      // Affiche le texte final (pour liens, sélection, etc.)
-      container.innerHTML = html;
+      c.orbitLine?.position.copy(p.obj.position);
+      c.obj.userData.update?.(simTime);
+      c.obj.children.forEach((ch) => ch.userData.update?.(simTime));
     }
   }
-  step();
 }
 
-function updateAstroText() {
-  if (!isModelLoaded) { infoContainer.style.display = 'none'; return; }
-  const satList = satellites[currentAstreIndex];
-  if (!satList) { infoContainer.style.display = 'none'; return; }
-  const obj = satList[currentSatelliteIndex];
-  if (!obj) { infoContainer.style.display = 'none'; return; }
-  const name = obj.name;
-  const html = astroTexts[name];
-  if (html) {
-    if (lastAstroText !== name) {
-      infoContainer.style.display = 'block';
-      infoContainer.style.opacity = '0';
-      infoContainer.style.transform = 'translateY(20px)';
-      setTimeout(() => {
-        // Placement configurable
-        infoContainer.style.top = astroTextPositions[name]?.top || '';
-        infoContainer.style.left = astroTextPositions[name]?.left || '';
-        infoContainer.style.right = astroTextPositions[name]?.right || '';
-        infoContainer.style.bottom = astroTextPositions[name]?.bottom || '';
-        infoContainer.style.transform = astroTextPositions[name]?.transform || 'translateY(0)';
-        setTimeout(() => {
-          infoContainer.style.opacity = '1';
-          if (!astroTextPositions[name]?.transform) infoContainer.style.transform = 'translateY(0)';
-        }, 10);
-        // Effet hacker sur le texte
-        animateHackerText(html, infoContainer);
-      }, 200);
-      lastAstroText = name;
-    }
+// ---------------------------------------------------------------------------
+// Caméra : cadrage, glissés entre astres, rotation à la souris
+// ---------------------------------------------------------------------------
+let current = null;
+const look = new THREE.Vector3();
+const user = { yaw: 0, pitch: 0, zoom: 1, tYaw: 0, tPitch: 0, tZoom: 1 };
+let trans = null;
+const viewOffset = { x: 0, y: 0, tx: 0, ty: 0 };
+
+function bodyCenter(b, out = new THREE.Vector3()) {
+  if (!b.obj) return out.set(0, 0, 0);
+  return b.obj.localToWorld(out.copy(b.centerLocal || tmpV.set(0, 0, 0)));
+}
+
+function frameFor(b) {
+  const center = bodyCenter(b);
+  if (b.kind === 'star') {
+    const yaw = 0.55 + user.yaw;
+    const pitch = THREE.MathUtils.clamp(0.62 + user.pitch, 0.05, 1.45);
+    const dist = 1500 * user.zoom * Math.max(1, 1.05 / camera.aspect);
+    const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+    return { pos: center.clone().addScaledVector(dir, dist), look: center };
+  }
+  const R = b.viewRadius || 3;
+  let dir;
+  if (b.view?.surface && b.parent) {
+    // Vue rasante au-dessus d'un élément posé sur une planète
+    const n = center.clone().sub(bodyCenter(b.parent)).normalize();
+    const side = new THREE.Vector3(0, 1, 0).cross(n).normalize();
+    dir = n.clone().multiplyScalar(0.8).addScaledVector(side, 0.45).add(new THREE.Vector3(0, 0.35, 0)).normalize();
+    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), user.yaw);
   } else {
-    if (infoContainer.style.display !== 'none') {
-      infoContainer.style.opacity = '0';
-      infoContainer.style.transform = 'translateY(20px)';
-      setTimeout(() => {
-        infoContainer.style.display = 'none';
-        infoContainer.innerHTML = '';
-      }, 400);
-      lastAstroText = '';
-    }
+    const toSun = center.clone().negate().setY(0).normalize();
+    const yaw = Math.atan2(toSun.x, toSun.z) + 0.7 + user.yaw;
+    const basePitch = b.view?.pitch ?? (b.isLandmark ? 0.6 : b.kind === 'planet' ? 0.3 : 0.35);
+    const pitch = THREE.MathUtils.clamp(basePitch + user.pitch, -1.2, 1.4);
+    dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
   }
+  // En portrait (mobile), le champ horizontal est étroit : on recule
+  const portrait = Math.max(1, 1.05 / camera.aspect);
+  const dist = R * 3.1 * (b.view?.dist || (b.isLandmark ? 0.8 : 1)) * user.zoom * portrait;
+  // Pour les lunes-monuments, on vise le bâtiment posé au sommet
+  if (b.isLandmark) center.y += b.obj.userData.topY * 0.8;
+  return { pos: center.clone().addScaledVector(dir, dist), look: center };
 }
 
-function updateAstroLabels(forceHide = false) {
-  if (!isModelLoaded) return;
-  // Masque tous les labels d'abord
-  Object.values(astroLabels).forEach(label => { label.style.opacity = '0'; });
-  if (forceHide) return;
+const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+function bezier(a, b, c, d, t) {
+  const u = 1 - t;
+  return a.clone().multiplyScalar(u * u * u)
+    .addScaledVector(b, 3 * u * u * t)
+    .addScaledVector(c, 3 * u * t * t)
+    .addScaledVector(d, t * t * t);
+}
 
-  // Si la caméra est centrée sur l'étoile, on affiche seulement les labels des objets principaux (étoile, planètes, cubes)
-  if (currentAstreIndex === 0) {
-    // Liste des objets principaux à labeler (pas les satellites de planète 1)
-    const mainObjects = [
-      satellites[0][0], // Etoile
-      satellites[1][0], // Planète 1
-      satellites[2][0], satellites[2][1], satellites[2][2], satellites[2][3], satellites[2][4] // Planète 2 + ses satellites (cubes)
-    ];
-    mainObjects.forEach(obj => {
-      if (!obj) return;
-      const name = obj.name;
-      const label = astroLabels[name];
-      if (!label) return;
-      const worldPos = obj.getWorldPosition(new THREE.Vector3());
-      const screenPos = worldPos.clone().project(camera);
-      const x = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-(screenPos.y * 0.5) + 0.5) * window.innerHeight - 48;
-      label.style.left = `${x}px`;
-      label.style.top = `${y}px`;
-      label.style.opacity = '1';
-    });
+function startTransition(target) {
+  const to = frameFor(target).pos;
+  const from = camera.position.clone();
+  const d = from.distanceTo(to);
+  // Arc : on s'élève, et on contourne le soleil si la trajectoire le traverse
+  const seg = to.clone().sub(from);
+  const t = THREE.MathUtils.clamp(-from.dot(seg) / Math.max(seg.lengthSq(), 1e-6), 0, 1);
+  const closest = from.clone().addScaledVector(seg, t);
+  const lift = new THREE.Vector3(0, d * 0.16, 0);
+  const safe = SUN_RADIUS * 2.0;
+  if (closest.length() < safe) {
+    const away = closest.lengthSq() > 1 ? closest.clone().normalize() : new THREE.Vector3(0, 1, 0);
+    lift.addScaledVector(away, (safe - closest.length()) * 1.6);
+  }
+  trans = {
+    from, fromLook: look.clone(), lift, t: 0,
+    dur: reduceMotion ? 0.01 : THREE.MathUtils.clamp(1.1 + d / 700, 1.1, 3.0),
+  };
+}
+
+function updateCamera(dt) {
+  user.yaw += (user.tYaw - user.yaw) * Math.min(1, dt * 8);
+  user.pitch += (user.tPitch - user.pitch) * Math.min(1, dt * 8);
+  user.zoom += (user.tZoom - user.zoom) * Math.min(1, dt * 8);
+  const f = frameFor(current);
+  let fov = 50;
+  if (trans) {
+    trans.t = Math.min(1, trans.t + dt / trans.dur);
+    const u = easeInOut(trans.t);
+    const c1 = trans.from.clone().add(trans.lift);
+    const c2 = f.pos.clone().addScaledVector(trans.lift, 0.6);
+    camera.position.copy(bezier(trans.from, c1, c2, f.pos, u));
+    look.copy(trans.fromLook).lerp(f.look, easeInOut(Math.min(1, trans.t * 1.25)));
+    fov = 50 + Math.sin(u * Math.PI) * 7;
+    if (trans.t >= 1) trans = null;
+  } else {
+    camera.position.copy(f.pos);
+    look.copy(f.look);
+  }
+  camera.lookAt(look);
+  // Décalage du point de fuite pour laisser l'astre entre le panneau et le journal
+  viewOffset.x += (viewOffset.tx - viewOffset.x) * Math.min(1, dt * 5);
+  viewOffset.y += (viewOffset.ty - viewOffset.y) * Math.min(1, dt * 5);
+  camera.fov = fov;
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.setViewOffset(w, h, viewOffset.x, viewOffset.y, w, h);
+  camera.updateProjectionMatrix();
+}
+
+function computeViewOffset() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const mobile = w <= 760;
+  if (mobile) {
+    const top = 70;
+    const bottom = ui.panel.classList.contains('visible') ? ui.panel.getBoundingClientRect().top : h - 80;
+    viewOffset.tx = 0;
+    viewOffset.ty = h / 2 - (top + bottom) / 2;
     return;
   }
-  // Sinon, affiche et positionne le label de l'objet focus
-  const satList = satellites[currentAstreIndex];
-  if (!satList) return;
-  const obj = satList[currentSatelliteIndex];
-  if (!obj) return;
-  const name = obj.name;
-  const label = astroLabels[name];
-  if (!label) return;
-  const worldPos = obj.getWorldPosition(new THREE.Vector3());
-  const screenPos = worldPos.clone().project(camera);
-  const x = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
-  const y = (-(screenPos.y * 0.5) + 0.5) * window.innerHeight - 48;
-  label.style.left = `${x}px`;
-  label.style.top = `${y}px`;
-  label.style.opacity = '1';
+  const left = ui.panel.classList.contains('visible') ? ui.panel.getBoundingClientRect().right : 0;
+  const right = tree.getBoundingClientRect().left || w;
+  viewOffset.tx = w / 2 - (left + right) / 2;
+  viewOffset.ty = 0;
 }
 
-function focusOnAstre() {
-  if (!isModelLoaded) return;
-  const satList = satellites[currentAstreIndex];
-  if (satList && satList[currentSatelliteIndex]) {
-    const obj = satList[currentSatelliteIndex];
-    const pos = obj.getWorldPosition(new THREE.Vector3());
-    let offset, lookAtTarget;
-    if (currentAstreIndex === 0) {
-      offset = new THREE.Vector3(200, 100, 200).sub(pos);
-      lookAtTarget = pos.clone();
-      targetCameraPosition = pos.clone().add(offset);
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 2 && currentSatelliteIndex === 0) {
-      const etoile = satellites[0][0];
-      const etoilePos = etoile.getWorldPosition(new THREE.Vector3());
-      const axis = new THREE.Vector3().subVectors(pos, etoilePos);
-      axis.y = 0;
-      axis.normalize();
-      offset = axis.clone().multiplyScalar(25).add(new THREE.Vector3(0, 12, 0));
-      const cameraPos = pos.clone().add(offset);
-      cameraPos.y = Math.max(cameraPos.y, 12);
-      targetCameraPosition = cameraPos;
-      lookAtTarget = pos.clone().add(axis.clone().multiplyScalar(-10)).setY(0);
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentSatelliteIndex === 0) {
-      const etoile = satellites[0][0];
-      const etoilePos = etoile.getWorldPosition(new THREE.Vector3());
-      const axis = new THREE.Vector3().subVectors(pos, etoilePos);
-      axis.y = 0;
-      axis.normalize();
-      offset = axis.clone().multiplyScalar(5);
-      const cameraPos = pos.clone().add(offset);
-      cameraPos.y = 0;
-      targetCameraPosition = cameraPos;
-      lookAtTarget = etoilePos.clone().setY(0);
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 2 && (currentSatelliteIndex === 1 || currentSatelliteIndex === 2 || currentSatelliteIndex === 3 || currentSatelliteIndex === 4)) {
-      // Suivi spécial pour tous les satellites de la planète 2 (cubes)
-      offset = new THREE.Vector3(0, 10, 5);
-      targetCameraPosition = pos.clone().add(offset);
-      lookAtTarget = pos.clone();
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 1 && currentSatelliteIndex === 1) {
-      offset = new THREE.Vector3(0, 3, 1.5);
-      targetCameraPosition = pos.clone().add(offset);
-      lookAtTarget = pos.clone();
-      targetLookAt = lookAtTarget.clone();
-    } else if (currentAstreIndex === 1 && currentSatelliteIndex === 2) {
-      offset = new THREE.Vector3(0, 3, 1.5);
-      targetCameraPosition = pos.clone().add(offset);
-      lookAtTarget = pos.clone();
-      targetLookAt = lookAtTarget.clone();
-    } else {
-      const planete = satList[0];
-      const planetePos = planete.getWorldPosition(new THREE.Vector3());
-      const axis = new THREE.Vector3().subVectors(pos, planetePos);
-      axis.y = 0;
-      axis.normalize();
-      offset = axis.clone().multiplyScalar(5);
-      const cameraPos = pos.clone().add(offset);
-      cameraPos.y = 0;
-      targetCameraPosition = cameraPos;
-      lookAtTarget = planetePos.clone().setY(0);
-      targetLookAt = lookAtTarget.clone();
+// ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+function goTo(id) {
+  const b = byId[id];
+  if (!b || !ready || b === current || overlayOpen) return;
+  const first = !current;
+  current = b;
+  user.tYaw = user.tPitch = 0;
+  user.tZoom = 1;
+  if (first) {
+    camera.position.copy(frameFor(b).pos).add(new THREE.Vector3(0, 900, 1400));
+    look.set(0, 0, 0);
+  }
+  startTransition(b);
+  explored.add(b.id);
+  saveExplored();
+  updateTree();
+  updateHud();
+  updatePanel();
+  try { history.replaceState(null, '', `#${b.id}`); } catch (e) { /* ignore */ }
+}
+
+function groupOf(b) { return b.parent || b; }
+function stepPlanet(d) {
+  const i = SYSTEM.indexOf(groupOf(current));
+  goTo(SYSTEM[(i + d + SYSTEM.length) % SYSTEM.length].id);
+}
+function stepMoon(d) {
+  const g = groupOf(current);
+  const list = [g, ...g.children];
+  const i = list.indexOf(current);
+  goTo(list[(i + d + list.length) % list.length].id);
+}
+
+function updateHud() {
+  const g = groupOf(current);
+  ui.path.textContent = current === g ? g.name : `${g.name} › ${current.name}`;
+  ui.section.textContent = current.section;
+  ui.nav.style.setProperty('--c', current.color);
+  ui.title.classList.toggle('visible', current.kind === 'star');
+}
+
+// --- Panneau de texte : apparition douce, paragraphe après paragraphe ---
+function reveal(html, el) {
+  el.innerHTML = html;
+  [...el.children].forEach((c, i) => c.style.setProperty('--i', i));
+  el.classList.remove('reveal');
+  void el.offsetWidth;
+  el.classList.add('reveal');
+}
+
+let panelTimer = null;
+function updatePanel() {
+  const html = TEXTS[current.id];
+  ui.panel.classList.remove('visible');
+  ui.panel.style.setProperty('--c', current.color);
+  clearTimeout(panelTimer);
+  panelTimer = setTimeout(() => {
+    if (!html) return;
+    ui.panel.scrollTop = 0;
+    reveal(html, ui.panelBody);
+    ui.panel.classList.add('visible');
+    computeViewOffset();
+  }, 260);
+  computeViewOffset();
+}
+
+// --- Étiquettes ---
+function updateLabels() {
+  const g = current ? groupOf(current) : null;
+  const w = window.innerWidth, h = window.innerHeight;
+  for (const b of BODIES) {
+    const el = b.label;
+    let show = false;
+    if (ready && current && !overlayOpen && b.obj) {
+      if (current.kind === 'star') show = b.kind !== 'moon';
+      else show = b === g || b.parent === g || (b.kind !== 'moon' && b !== g);
     }
-    camera.userData.targetObject = obj;
-    camera.userData.offset = offset;
-    camera.userData.lookAtTarget = lookAtTarget;
-    cameraStartPos.copy(camera.position);
-    cameraStartLookAt.copy(getCurrentCameraLookAt());
-    cameraSmoothT = 0;
-    // Détermination du mode de transition
-    const camToTarget = targetCameraPosition.clone().sub(cameraStartPos).normalize();
-    const camForward = getCameraForward();
-    const dot = camToTarget.dot(camForward);
-    const dist = cameraStartPos.distanceTo(targetCameraPosition);
-    // Cas spécial : Planète 1.1 <-> Roche (jamais de recul)
-    const isPlanete1Roche = (
-      (satList[0]?.name === 'Planète_11' && obj.name === 'Roche004') ||
-      (satList[0]?.name === 'Roche004' && obj.name === 'Planète_11')
-    );
-    // Pas de recul si objets proches (< 80)
-    if (isPlanete1Roche || dist < 80) {
-      cameraTransitionMode = 'linear';
-    } else if (dot < -0.35) {
-      cameraTransitionMode = 'backward';
-    } else {
-      // Optionnel : si derrière l'étoile (intersection segment caméra-cible avec sphère étoile)
-      const etoile = satellites[0][0];
-      if (etoile) {
-        const etoilePos = etoile.getWorldPosition(new THREE.Vector3());
-        const etoileRay = etoileRadius * 1.1;
-        const seg = {start: cameraStartPos, end: targetCameraPosition};
-        const d = seg.end.clone().sub(seg.start);
-        const f = seg.start.clone().sub(etoilePos);
-        const a = d.dot(d);
-        const b = 2 * f.dot(d);
-        const c = f.dot(f) - etoileRay * etoileRay;
-        const discriminant = b*b - 4*a*c;
-        if (discriminant > 0) {
-          // Il y a intersection, donc derrière l'étoile
-          cameraTransitionMode = 'zoomout';
-          // Position de dézoom : on recule sur la droite caméra-cible
-          const mid = cameraStartPos.clone().add(targetCameraPosition).multiplyScalar(0.5);
-          const dir = mid.clone().sub(etoilePos).normalize();
-          cameraZoomOutPos = etoilePos.clone().add(dir.multiplyScalar(etoileRay * 2.2));
-        } else {
-          cameraTransitionMode = 'linear';
-        }
-      } else {
-        cameraTransitionMode = 'linear';
+    if (show) {
+      const c = bodyCenter(b, tmpV);
+      c.y += (b.viewRadius || 3) * (b.kind === 'star' ? 1.05 : 1.2);
+      c.project(camera);
+      if (c.z > 1 || c.z < -1) show = false;
+      else {
+        el.style.left = `${(c.x * 0.5 + 0.5) * w}px`;
+        el.style.top = `${(-c.y * 0.5 + 0.5) * h}px`;
       }
     }
+    el.classList.toggle('visible', show);
+    el.classList.toggle('current', b === current);
+    el.classList.toggle('far', show && b.kind !== 'moon' && g !== b && current.kind !== 'star');
+    el.tabIndex = show ? 0 : -1;
   }
-  updateAstroText();
-  updatePlanetariumTitle();
-  updateAstroLabels();
 }
 
-function getCurrentCameraLookAt() {
-  // Utilise un rayon pour obtenir le lookAt courant
-  const direction = new THREE.Vector3();
-  camera.getWorldDirection(direction);
-  return camera.position.clone().add(direction.multiplyScalar(100));
-}
-
-function smoothstep(t) {
-  // Accélère puis ralentit (ease in/out)
-  return t * t * (3 - 2 * t);
-}
-
-function lerpVec3(a, b, t) {
-  return new THREE.Vector3(
-    a.x + (b.x - a.x) * t,
-    a.y + (b.y - a.y) * t,
-    a.z + (b.z - a.z) * t
-  );
-}
-
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown') { // Inversé !
-    currentAstreIndex = (currentAstreIndex + 1) % astres.length;
-    currentSatelliteIndex = 0;
-    focusOnAstre();
-  } else if (e.key === 'ArrowUp') { // Inversé !
-    currentAstreIndex = (currentAstreIndex - 1 + astres.length) % astres.length;
-    currentSatelliteIndex = 0;
-    focusOnAstre();
-  } else if (e.key === 'ArrowRight') {
-    const satList = satellites[currentAstreIndex];
-    if (satList) {
-      currentSatelliteIndex = (currentSatelliteIndex + 1) % satList.length;
-      focusOnAstre();
-    }
-  } else if (e.key === 'ArrowLeft') {
-    const satList = satellites[currentAstreIndex];
-    if (satList) {
-      currentSatelliteIndex = (currentSatelliteIndex - 1 + satList.length) % satList.length;
-      focusOnAstre();
+// --- Lignes d'orbite : on ne montre que celles du groupe visité ---
+function updateOrbits() {
+  const g = current ? groupOf(current) : null;
+  for (const p of SYSTEM) {
+    if (p.orbitLine) p.orbitLine.material.opacity = current?.kind === 'star' ? 0.28 : 0.12;
+    for (const c of p.children) {
+      if (!c.orbitLine) continue;
+      const target = g === p ? 0.3 : 0;
+      c.orbitLine.material.opacity += (target - c.orbitLine.material.opacity) * 0.08;
+      c.orbitLine.visible = c.orbitLine.material.opacity > 0.01;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Galeries de projets
+// ---------------------------------------------------------------------------
+let overlayOpen = false;
+function openGallery(key) {
+  const gal = GALLERIES[key];
+  if (!gal) return;
+  ui.overlay.innerHTML = `
+    <div class="project-card">
+      <p class="log-kicker">${gal.kicker}</p>
+      <h2>${gal.title}</h2>
+      <div class="project-photos">${gal.images.map((i) => `<img src="${i.src}" alt="${i.alt}" loading="lazy">`).join('')}</div>
+      <button class="log-button" type="button" data-close>Retour</button>
+    </div>`;
+  ui.overlay.style.display = 'flex';
+  requestAnimationFrame(() => ui.overlay.classList.add('open'));
+  overlayOpen = true;
+  ui.overlay.querySelector('[data-close]').focus();
+}
+function closeGallery() {
+  ui.overlay.classList.remove('open');
+  setTimeout(() => { ui.overlay.style.display = 'none'; ui.overlay.innerHTML = ''; }, 400);
+  overlayOpen = false;
+}
+document.addEventListener('click', (e) => {
+  const g = e.target.closest?.('[data-gallery]');
+  if (g) openGallery(g.dataset.gallery);
+  if (e.target.closest?.('[data-close]') || e.target === ui.overlay) closeGallery();
 });
 
-// Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 2); // Intensité augmentée
-scene.add(ambientLight);
+// ---------------------------------------------------------------------------
+// Entrées : clavier, boutons, souris / tactile
+// ---------------------------------------------------------------------------
+window.addEventListener('keydown', (e) => {
+  if (overlayOpen) { if (e.key === 'Escape') closeGallery(); return; }
+  if (!current || e.target.closest?.('input, textarea')) return;
+  const k = { ArrowDown: () => stepPlanet(1), ArrowUp: () => stepPlanet(-1), ArrowRight: () => stepMoon(1), ArrowLeft: () => stepMoon(-1), Escape: () => goTo('lexa') }[e.key];
+  if (k) { e.preventDefault(); k(); }
+});
+ui.nav.addEventListener('click', (e) => {
+  const d = e.target.closest('button')?.dataset.nav;
+  if (!d || !current) return;
+  ({ up: () => stepPlanet(-1), down: () => stepPlanet(1), left: () => stepMoon(-1), right: () => stepMoon(1) })[d]();
+});
 
-// Optionnel : ajout d'une HemisphereLight pour un effet plus naturel
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-hemiLight.position.set(0, 200, 0);
-scene.add(hemiLight);
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 0.6;
+const pointer = { down: false, x: 0, y: 0, moved: 0, id: null };
+canvas.addEventListener('pointerdown', (e) => {
+  pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY; pointer.moved = 0; pointer.id = e.pointerId;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointer.down) {
+    // Survol : curseur main sur les astres
+    if (ready) canvas.style.cursor = pick(e.clientX, e.clientY) ? 'pointer' : 'grab';
+    return;
+  }
+  const dx = e.clientX - pointer.x, dy = e.clientY - pointer.y;
+  pointer.moved += Math.abs(dx) + Math.abs(dy);
+  pointer.x = e.clientX; pointer.y = e.clientY;
+  user.tYaw -= dx * 0.005;
+  user.tPitch = THREE.MathUtils.clamp(user.tPitch + dy * 0.004, -1.1, 1.0);
+  canvas.style.cursor = 'grabbing';
+});
+canvas.addEventListener('pointerup', (e) => {
+  pointer.down = false;
+  canvas.releasePointerCapture?.(e.pointerId);
+  canvas.style.cursor = 'grab';
+  if (pointer.moved < 6) {
+    const id = pick(e.clientX, e.clientY);
+    if (id) goTo(id);
+  }
+});
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  user.tZoom = THREE.MathUtils.clamp(user.tZoom * Math.exp(e.deltaY * 0.001), 0.45, 2.6);
+}, { passive: false });
 
-const controls = new OrbitControls(camera, renderer.domElement);
-
-// Stars
-function addStar() {
-  const geometry = new THREE.SphereGeometry(0.25, 24, 24);
-  const material = new THREE.MeshStandardMaterial({ color: 0xffffff });
-  const star = new THREE.Mesh(geometry, material);
-
-  const [x, y, z] = Array(3).fill().map(() => THREE.MathUtils.randFloatSpread(1000));
-  star.position.set(x, y, z);
-  scene.add(star);
+function pick(x, y) {
+  raycaster.setFromCamera(new THREE.Vector2((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1), camera);
+  const hit = raycaster.intersectObjects(pickables, false)[0];
+  return hit?.object.userData.bodyId || null;
 }
-Array(2000).fill().forEach(addStar); 
 
-// Render Loop
-function animate() {
-  if (!isModelLoaded) return;
-  requestAnimationFrame(animate);
-
-  // --- ANIMATION MANUELLE DES ASTRES ---
-  const now = performance.now();
-  const dt = (now - lastAnimTime) / 1000; // en secondes
-  lastAnimTime = now;
-  // Récupération des objets (si chargés)
-  const etoile = satellites[0]?.[0];
-  const planete1 = satellites[1]?.[0];
-  const roche = satellites[1]?.[1];
-  const planete2 = satellites[2]?.[0];
-  const cube = satellites[2]?.[1];
-  const cube2 = satellites[2]?.[2];
-  const cube012 = satellites[2]?.[3];
-  const cube013 = satellites[2]?.[4];
-
-  // Planète 1.1 (PERSION)
-  if (etoile && planete1) {
-    // Révolution antihoraire
-    planetMotionState.theta11 -= (2 * Math.PI / planetMotionParams.T11) * dt;
-    planete1.position.x = etoile.position.x + r1 * Math.cos(planetMotionState.theta11);
-    planete1.position.z = etoile.position.z + r1 * Math.sin(planetMotionState.theta11);
-    planete1.position.y = etoile.position.y;
-    // Pas de rotation sur elle-même
+// ---------------------------------------------------------------------------
+// La boucle de 22 minutes (clin d'œil)
+// ---------------------------------------------------------------------------
+const LOOP = 22 * 60;
+let loopLeft = LOOP;
+let nova = null;
+function updateLoop(dt) {
+  if (nova) {
+    nova.t += dt;
+    const t = nova.t;
+    const boost = t < 3 ? t / 3 : Math.max(0, 1 - (t - 3) / 0.4);
+    sunMaterial.uniforms.uBoost.value = boost;
+    corona.scale.setScalar(SUN_RADIUS * 5 * (1 + boost * 2.5));
+    const flash = t < 2.6 ? 0 : t < 3.2 ? (t - 2.6) / 0.6 : Math.max(0, 1 - (t - 3.2) / 2.2);
+    film.uniforms.uFlash.value = flash;
+    ui.flash.style.opacity = flash * 0.6;
+    if (t > 5.6) { nova = null; loopLeft = LOOP; film.uniforms.uFlash.value = 0; ui.flash.style.opacity = 0; }
+    return;
   }
-  // Planète 2 (PROXION)
-  if (etoile && planete2) {
-    planetMotionState.theta21 -= (2 * Math.PI / planetMotionParams.T21) * dt;
-    planete2.position.x = etoile.position.x + r2 * Math.cos(planetMotionState.theta21);
-    planete2.position.z = etoile.position.z + r2 * Math.sin(planetMotionState.theta21);
-    planete2.position.y = etoile.position.y;
-    // Pas de rotation sur elle-même
-  }
-  // Roche (PETRA) autour de Planète 1.1
-  if (planete1 && roche) {
-    planetMotionState.theta12 -= (2 * Math.PI / planetMotionParams.T12) * dt;
-    roche.position.x = planete1.position.x + r12 * Math.cos(planetMotionState.theta12);
-    roche.position.z = planete1.position.z + r12 * Math.sin(planetMotionState.theta12);
-    roche.position.y = planete1.position.y;
-    // Rotation sur elle-même (seule Roche)
-    planetMotionState.rot12 -= (2 * Math.PI / planetMotionParams.t12) * dt;
-    roche.rotation.y = planetMotionState.rot12;
-  }
-  // Cube (EXP_//223) autour de l'étoile sur un cercle dans un plan incliné
-  if (etoile && cube) {
-    planetMotionState.theta22 -= (2 * Math.PI / planetMotionParams.T22) * dt;
-    // Plan incliné (ex: 30° autour de X)
-    const rCube = r2 * 0.92;
-    const angleIncline = Math.PI / 6; // 30°
-    const x = etoile.position.x + rCube * Math.cos(planetMotionState.theta22);
-    const y = etoile.position.y + rCube * Math.sin(planetMotionState.theta22) * Math.sin(angleIncline);
-    const z = etoile.position.z + rCube * Math.sin(planetMotionState.theta22) * Math.cos(angleIncline);
-    cube.position.set(x, y, z);
-  }
-  // Cube002 (SIMULX_5) autour de l'étoile sur un cercle dans un autre plan incliné
-  if (etoile && cube2) {
-    planetMotionState.theta23 -= (2 * Math.PI / planetMotionParams.T23) * dt;
-    // Plan incliné (ex: -25° autour de X)
-    const rCube2 = r2 * 1.05;
-    const angleIncline2 = -Math.PI / 7; // -25°
-    const x = etoile.position.x + rCube2 * Math.cos(planetMotionState.theta23);
-    const y = etoile.position.y + rCube2 * Math.sin(planetMotionState.theta23) * Math.sin(angleIncline2);
-    const z = etoile.position.z + rCube2 * Math.sin(planetMotionState.theta23) * Math.cos(angleIncline2);
-    cube2.position.set(x, y, z);
-  }
-  // Cube012 (LOG_EX) autour de l'étoile sur un cercle dans un plan incliné
-  if (etoile && cube012) {
-    planetMotionState.theta24 -= (2 * Math.PI / planetMotionParams.T24) * dt;
-    const rCube012 = r2 * 0.98;
-    const angleIncline3 = Math.PI / 4; // 45°
-    const x = etoile.position.x + rCube012 * Math.cos(planetMotionState.theta24);
-    const y = etoile.position.y + rCube012 * Math.sin(planetMotionState.theta24) * Math.sin(angleIncline3);
-    const z = etoile.position.z + rCube012 * Math.sin(planetMotionState.theta24) * Math.cos(angleIncline3);
-    cube012.position.set(x, y, z);
-    // Pas de rotation sur elle-même
-  }
-  // Cube013 (C4D3X) autour de l'étoile sur un cercle dans un plan incliné
-  if (etoile && cube013) {
-    planetMotionState.theta25 -= (2 * Math.PI / planetMotionParams.T25) * dt;
-    const rCube013 = r2 * 1.08;
-    const angleIncline4 = -Math.PI / 5; // -36°
-    const x = etoile.position.x + rCube013 * Math.cos(planetMotionState.theta25);
-    const y = etoile.position.y + rCube013 * Math.sin(planetMotionState.theta25) * Math.sin(angleIncline4);
-    const z = etoile.position.z + rCube013 * Math.sin(planetMotionState.theta25) * Math.cos(angleIncline4);
-    cube013.position.set(x, y, z);
-    planetMotionState.rot25 -= (2 * Math.PI / planetMotionParams.t25) * dt;
-    cube013.rotation.y = planetMotionState.rot25;
-  }
-
-  if (camera.userData.targetObject) {
-    // Utilise directement la position courante de l'objet (après animation manuelle)
-    const obj = camera.userData.targetObject;
-    const pos = obj.getWorldPosition(new THREE.Vector3());
-    let nextTargetCameraPosition, nextTargetLookAt;
-    if (currentAstreIndex === 0) {
-      nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(200, 100, 200));
-      nextTargetLookAt = pos.clone();
-    } else if (currentAstreIndex === 2 && currentSatelliteIndex === 0) {
-      const etoile = satellites[0][0];
-      const etoilePos = etoile.getWorldPosition(new THREE.Vector3());
-      const axis = new THREE.Vector3().subVectors(pos, etoilePos);
-      axis.y = 0;
-      axis.normalize();
-      nextTargetCameraPosition = pos.clone().add(axis.clone().multiplyScalar(25)).add(new THREE.Vector3(0, 12, 0));
-      nextTargetCameraPosition.y = Math.max(nextTargetCameraPosition.y, 12);
-      nextTargetLookAt = pos.clone().add(axis.clone().multiplyScalar(-10)).setY(0);
-    } else if (currentSatelliteIndex === 0) {
-      const etoile = satellites[0][0];
-      const etoilePos = etoile.getWorldPosition(new THREE.Vector3());
-      const axis = new THREE.Vector3().subVectors(pos, etoilePos);
-      axis.y = 0;
-      axis.normalize();
-      nextTargetCameraPosition = pos.clone().add(axis.clone().multiplyScalar(5));
-      nextTargetCameraPosition.y = 0;
-      nextTargetLookAt = etoilePos.clone().setY(0);
-    } else if (currentAstreIndex === 2 && (currentSatelliteIndex === 1 || currentSatelliteIndex === 2 || currentSatelliteIndex === 3 || currentSatelliteIndex === 4)) {
-      nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 10, 5));
-      nextTargetLookAt = pos.clone();
-    } else if (currentAstreIndex === 1 && currentSatelliteIndex === 1) {
-      nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 3, 1.5));
-      nextTargetLookAt = pos.clone();
-    } else if (currentAstreIndex === 1 && currentSatelliteIndex === 2) {
-      nextTargetCameraPosition = pos.clone().add(new THREE.Vector3(0, 3, 1.5));
-      nextTargetLookAt = pos.clone();
-    } else {
-      const planete = satellites[currentAstreIndex][0];
-      const planetePos = planete.getWorldPosition(new THREE.Vector3());
-      const axis = new THREE.Vector3().subVectors(pos, planetePos);
-      axis.y = 0;
-      axis.normalize();
-      nextTargetCameraPosition = pos.clone().add(axis.clone().multiplyScalar(5));
-      nextTargetCameraPosition.y = 0;
-      nextTargetLookAt = planetePos.clone().setY(0);
-    }
-    // Smooth transition
-    if (cameraSmoothT < 1) {
-      cameraSmoothT = Math.min(1, cameraSmoothT + (dt / CAMERA_SMOOTH_DURATION));
-      const t = smoothstep(cameraSmoothT);
-      if (cameraTransitionMode === 'backward') {
-        // On recule d'abord, puis avance
-        let mid = cameraStartPos.clone().sub(getCameraForward().multiplyScalar(120));
-        if (t < 0.5) {
-          camera.position.copy(lerpVec3(cameraStartPos, mid, t * 2));
-        } else {
-          camera.position.copy(lerpVec3(mid, nextTargetCameraPosition, (t-0.5)*2));
-        }
-      } else if (cameraTransitionMode === 'zoomout' && cameraZoomOutPos) {
-        // On va vers une position éloignée, puis vers la cible
-        if (t < 0.5) {
-          camera.position.copy(lerpVec3(cameraStartPos, cameraZoomOutPos, t * 2));
-        } else {
-          camera.position.copy(lerpVec3(cameraZoomOutPos, nextTargetCameraPosition, (t-0.5)*2));
-        }
-      } else {
-        // Linéaire avec ease in/out
-        camera.position.copy(lerpVec3(cameraStartPos, nextTargetCameraPosition, t));
-      }
-      const lerpedLookAt = lerpVec3(cameraStartLookAt, nextTargetLookAt, t);
-      camera.lookAt(lerpedLookAt);
-    } else {
-      camera.position.copy(nextTargetCameraPosition);
-      camera.lookAt(nextTargetLookAt);
-    }
-  }
-
-  updateAstroLabels(isProjectOverlayOpen); // repositionne le label à chaque frame, mais masque si overlay
-
-  if (mixer) {
-    const delta = clock.getDelta();
-    mixer.update(delta);
-  }
-
-  renderer.render(scene, camera);
+  loopLeft -= dt;
+  if (loopLeft <= 0 && !reduceMotion) nova = { t: 0 };
+  const s = Math.max(0, Math.ceil(loopLeft));
+  ui.time.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
+
+// ---------------------------------------------------------------------------
+// Boucle de rendu
+// ---------------------------------------------------------------------------
+const clock = new THREE.Clock();
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  simTime += dt;
+  sunMaterial.uniforms.uTime.value = simTime;
+  stars.material.uniforms.uTime.value = simTime;
+  film.uniforms.uTime.value = simTime;
+  corona.material.rotation = simTime * 0.01;
+  if (!nova) corona.scale.setScalar(SUN_RADIUS * 5 * (1 + Math.sin(simTime * 0.7) * 0.02));
+
+  if (ready) {
+    placeBodies(dt);
+    if (current) updateCamera(dt);
+    updateLabels();
+    updateOrbits();
+    updateLoop(dt);
+  }
+  sky.position.copy(camera.position);
+  stars.position.copy(camera.position);
+  composer.render();
+}
+frame();
 
 window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  updateAstroLabels(isProjectOverlayOpen);
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  computeViewOffset();
 });
 
-updatePlanetariumTitle();
-animate();
+// ---------------------------------------------------------------------------
+// Chargement
+// ---------------------------------------------------------------------------
+new GLTFLoader().load(
+  import.meta.env.BASE_URL + 'Planetarium.glb',
+  (gltf) => {
+    buildSystem(gltf);
+    ui.loader.classList.add('hidden');
+    setTimeout(() => ui.loader.remove(), 1400);
+    [ui.nav, ui.timer, tree].forEach((el) => el.classList.add('visible'));
+    const start = location.hash.slice(1);
+    goTo(byId[start] ? start : 'lexa');
+  },
+  (xhr) => {
+    if (!xhr.total) return;
+    const p = Math.round((100 * xhr.loaded) / xhr.total);
+    ui.loaderBar.style.width = `${p}%`;
+    ui.loaderPct.textContent = `${p} %`;
+  },
+  (err) => {
+    console.error(err);
+    ui.loaderPct.textContent = 'Impossible de charger le système.';
+  }
+);
