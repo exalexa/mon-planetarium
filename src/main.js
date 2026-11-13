@@ -737,24 +737,33 @@ window.addEventListener('resize', () => {
 // ---------------------------------------------------------------------------
 // Chargement
 // ---------------------------------------------------------------------------
-new GLTFLoader().load(
-  import.meta.env.BASE_URL + 'Planetarium.glb',
-  (gltf) => {
+function onModelLoaded(gltf) {
     buildSystem(gltf);
     ui.loader.classList.add('hidden');
     setTimeout(() => ui.loader.remove(), 1400);
     [ui.nav, ui.timer, tree].forEach((el) => el.classList.add('visible'));
     const start = location.hash.slice(1);
     goTo(byId[start] ? start : 'lexa');
-  },
-  (xhr) => {
-    if (!xhr.total) return;
-    const p = Math.round((100 * xhr.loaded) / xhr.total);
-    ui.loaderBar.style.width = `${p}%`;
-    ui.loaderPct.textContent = `${p} %`;
-  },
-  (err) => {
-    console.error(err);
-    ui.loaderPct.textContent = 'Impossible de charger le système.';
-  }
-);
+}
+function onModelError(err) {
+  console.error(err);
+  ui.loaderPct.textContent = 'Impossible de charger le système.';
+}
+const gltfLoader = new GLTFLoader();
+if (window.__PLANETARIUM_GLB__) {
+  // Modèle embarqué en base64 (version aperçu hébergée sans fichier .glb)
+  const bin = Uint8Array.from(atob(window.__PLANETARIUM_GLB__), (c) => c.charCodeAt(0));
+  gltfLoader.parse(bin.buffer, '', onModelLoaded, onModelError);
+} else {
+  gltfLoader.load(
+    import.meta.env.BASE_URL + 'Planetarium.glb',
+    onModelLoaded,
+    (xhr) => {
+      if (!xhr.total) return;
+      const p = Math.round((100 * xhr.loaded) / xhr.total);
+      ui.loaderBar.style.width = `${p}%`;
+      ui.loaderPct.textContent = `${p} %`;
+    },
+    onModelError
+  );
+}
