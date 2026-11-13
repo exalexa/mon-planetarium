@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   createSky, createStarfield, createSunMaterial, createCorona, createAtmosphere, createComposer,
-  createAsteroidBelt, createGalaxies,
+  createAsteroidBelt, createGalaxies, createSolarWind, createProminences, createComet, createMapDot,
 } from './effects.js';
 import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
@@ -11,10 +11,10 @@ import { TEXTS, GALLERIES } from './content.js';
 
 const BODIES = flattenSystem();
 const byId = Object.fromEntries(BODIES.map((b) => [b.id, b]));
-const SUN_RADIUS = 40;
-// Gravitation (unités de la scène, temps accéléré) : T = 2π √(a³ / GM)
-const GM_SUN = 1480;
-const GM_PLANET = 80;
+const SUN_RADIUS = 50;
+// Gravitation (unités de la scène, temps accéléré) : T = 2π √(a³ / GM).
+// GM du soleil choisi pour qu'une année de PERSION (1 UA) dure 4 minutes.
+const GM_SUN = 4701;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches || location.search.includes('instant');
 
 // ---------------------------------------------------------------------------
@@ -50,17 +50,29 @@ camera.add(fill, fill.target);
 scene.add(camera);
 
 // Ceintures d'astéroïdes : principale (entre PERSION et SCHOLA) et ceinture glacée au-delà de MUSA
+// (2,2 – 3,3 UA → 330 – 440 unités ; Kuiper ramenée à 1150 – 1400 pour rester visible)
 const belts = [
-  { mesh: createAsteroidBelt({ inner: 166, outer: 194, count: 800, thickness: 5, color: 0x8b7f70, size: [0.3, 1.6], seed: 3 }), r: 180 },
-  { mesh: createAsteroidBelt({ inner: 800, outer: 900, count: 1500, thickness: 26, color: 0x9fb2c4, size: [0.6, 3.4], seed: 8 }), r: 850 },
+  { mesh: createAsteroidBelt({ inner: 330, outer: 440, count: 1800, thickness: 16, color: 0x8b7f70, size: [0.25, 1.6], seed: 3 }), r: 385 },
+  { mesh: createAsteroidBelt({ inner: 1150, outer: 1400, count: 2200, thickness: 70, color: 0x9fb2c4, size: [0.8, 4], seed: 8 }), r: 1275 },
 ];
 belts.forEach((b) => { b.n = Math.sqrt(GM_SUN / b.r ** 3); scene.add(b.mesh); });
+
+// Vent solaire (spirale de Parker) et protubérances
+const solarWind = createSolarWind({ sunRadius: SUN_RADIUS, maxRadius: 1150 });
+solarWind.material.uniforms.uPixelRatio.value = pixelRatio;
+scene.add(solarWind);
+const prominences = createProminences(SUN_RADIUS);
+scene.add(prominences);
+
+// Comète périodique sur une orbite très excentrique ; ses queues pointent à l'opposé du soleil
+const comet = { obj: createComet(), orbit: { a: 520, e: 0.86, i: 34, node: 2.2, peri: 1.0, M0: 0.15 } };
+scene.add(comet.obj);
 
 const { composer, film } = createComposer(renderer, scene, camera);
 composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 
 const sunMaterial = createSunMaterial();
-const corona = createCorona(SUN_RADIUS * 5);
+const corona = createCorona(SUN_RADIUS * 4.6);
 scene.add(corona);
 
 // ---------------------------------------------------------------------------
@@ -180,12 +192,14 @@ for (const b of BODIES) {
 // ---------------------------------------------------------------------------
 // Mécanique céleste : orbites képlériennes
 // ---------------------------------------------------------------------------
-function prepareOrbit(o, GM) {
+function prepareOrbit(o, GM, tilt = 0) {
   o.T = 2 * Math.PI * Math.sqrt((o.a ** 3) / GM);
   o.n = (2 * Math.PI) / o.T;
   o.M = o.M0 || 0;
   const deg = Math.PI / 180;
-  o.q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.node || 0)
+  // Les lunes orbitent dans le plan équatorial de leur planète (incliné de « tilt »)
+  o.q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), tilt)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.node || 0))
     .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (o.i || 0) * deg))
     .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.peri || 0));
 }
@@ -308,7 +322,9 @@ function buildSystem(gltf) {
       b.obj = obj;
     } else if (b.landmark) {
       b.obj = createLandmarkMoon({ radius: 4, seed: b.moon?.seed, colors: b.moon?.colors, ground: b.moon?.ground, landmark: b.landmark });
-      b.radius = b.radius || 4.6;
+      const sc = b.moon?.scale ?? 0.45;
+      b.obj.scale.setScalar(sc);
+      b.radius = b.radius || 4.6 * sc;
       b.isLandmark = true;
       scene.add(b.obj);
     } else if (b.build) {
@@ -316,10 +332,17 @@ function buildSystem(gltf) {
       scene.add(b.obj);
     }
     if (b.atmosphere) {
-      b.atmo = createAtmosphere(b.atmosphere.radius, b.atmosphere.color, { shell: b.atmosphere.shell });
+      b.atmo = createAtmosphere(b.atmosphere.radius, b.atmosphere.color, { shell: b.atmosphere.shell, strength: b.atmosphere.strength ?? 1 });
       scene.add(b.atmo);
     }
-    if (b.orbit) prepareOrbit(b.orbit, b.kind === 'planet' ? GM_SUN : GM_PLANET * (b.parent?.mass || 1));
+    if (b.orbit) prepareOrbit(b.orbit, b.kind === 'planet' ? GM_SUN : GM_SUN * b.parent.mu, b.kind === 'planet' ? 0 : b.parent.tilt || 0);
+    if (b.kind === 'planet' && b.obj) {
+      // Inclinaison de l'axe : on tourne d'abord sur l'axe propre (Y), puis on incline (Z)
+      b.obj.rotation.order = 'ZYX';
+      b.obj.rotation.z = b.tilt || 0;
+      b.mapDot = createMapDot(b.color);
+      scene.add(b.mapDot);
+    }
   }
   for (const b of BODIES) if (b.obj && b.kind !== 'star') toonify(b.obj);
   belts.forEach((b) => { b.mesh.material = toToon(b.mesh.material); });
@@ -345,6 +368,10 @@ function buildSystem(gltf) {
     }
   }
 
+  prepareOrbit(comet.orbit, GM_SUN);
+  comet.line = orbitLine(comet.orbit, '#bfe6ff', 0.07, true);
+  scene.add(comet.line);
+
   placeBodies(0);
   for (const b of BODIES) if (b.obj) measure(b);
   byId.lexa.viewRadius = SUN_RADIUS;
@@ -363,7 +390,7 @@ function rotatingFrame(p) {
 }
 function lagrangePoint(p, which, out) {
   const r = p.obj.position.length();
-  const mu = (GM_PLANET * (p.mass || 1)) / GM_SUN;
+  const mu = p.mu || 0.003;
   const { u } = rotatingFrame(p);
   if (which === 'L3') return out.copy(u).multiplyScalar(-r * (1 + (5 * mu) / 12));
   const rh = r * Math.cbrt(mu / 3);
@@ -428,14 +455,19 @@ function updateLagrangeMarkers() {
 // ---------------------------------------------------------------------------
 let simTime = 0;
 const tmpL = new THREE.Vector3();
+const ORIGIN = new THREE.Vector3();
 function placeBodies(dt) {
+  comet.orbit.M += comet.orbit.n * dt;
+  keplerPosition(comet.orbit, comet.obj.position);
+  comet.obj.userData.update(ORIGIN);
   for (const p of SYSTEM) {
     if (p.kind === 'star' || !p.obj) continue;
     p.orbit.M += p.orbit.n * dt;
     keplerPosition(p.orbit, p.obj.position);
     p.atmo?.position.copy(p.obj.position);
     // Rotation propre, bien visible depuis la caméra alignée
-    p.obj.rotation.y += dt * 0.06;
+    p.obj.rotation.y += dt * (p.spin ?? 0.06);
+    p.mapDot?.position.copy(p.obj.position);
     for (const c of p.children) {
       if (!c.obj || c.attached) continue;
       if (c.lagrange) {
@@ -490,12 +522,12 @@ function frameFor(b) {
   if (b.kind === 'star') {
     const yaw = 0.55 + user.yaw;
     const pitch = THREE.MathUtils.clamp(0.62 + user.pitch, 0.05, 1.45);
-    const dist = 1650 * user.zoom * portrait;
+    const dist = 2350 * user.zoom * portrait;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     return { pos: center.clone().addScaledVector(dir, dist), look: center };
   }
   const R = b.viewRadius || 3;
-  const dist = R * 3.1 * (b.view?.dist || (b.isLandmark ? 0.85 : 1)) * user.zoom * portrait;
+  const dist = R * 3.1 * (b.view?.dist || (b.isLandmark ? 0.85 : b.kind === 'planet' ? 1.6 : 1)) * user.zoom * portrait;
   if (b.view?.surface && b.parent) {
     // Vue rasante au-dessus d'un élément posé sur une planète
     const n = center.clone().sub(bodyCenter(b.parent)).normalize();
@@ -506,7 +538,9 @@ function frameFor(b) {
   }
   // Axe d'alignement : du parent (soleil ou planète) vers l'astre visité
   const parentPos = b.kind === 'planet' ? new THREE.Vector3() : bodyCenter(b.parent);
-  const u = center.clone().sub(parentPos).setY(0).normalize();
+  const u = center.clone().sub(parentPos).setY(0);
+  if (u.lengthSq() < 1e-4) u.set(1, 0, 0);
+  u.normalize();
   const side = UP.clone().cross(u).normalize();
   const alpha = (b.kind === 'planet' ? 0.85 : 0.6) + user.yaw;
   const basePitch = b.view?.pitch ?? (b.isLandmark ? 0.5 : b.kind === 'planet' ? 0.26 : 0.3);
@@ -515,7 +549,7 @@ function frameFor(b) {
   const dir = flat.multiplyScalar(Math.cos(pitch)).addScaledVector(UP, Math.sin(pitch)).normalize();
   // Pour les lunes-monuments, on vise le bâtiment posé au sommet
   const focus = center.clone();
-  if (b.isLandmark) focus.y += b.obj.userData.topY * 0.75;
+  if (b.isLandmark) focus.y += b.obj.userData.topY * b.obj.scale.x * 0.75;
   const look = focus.clone().addScaledVector(u, -R * (b.kind === 'planet' ? 1.5 : 0.9));
   return { pos: focus.clone().addScaledVector(dir, dist), look };
 }
@@ -707,6 +741,7 @@ function updateLabels() {
 function updateOrbits() {
   const g = current ? groupOf(current) : null;
   for (const p of SYSTEM) {
+    if (p.mapDot) p.mapDot.visible = !current || current.kind === 'star' || g !== p;
     if (p.orbitLine) p.orbitLine.material.opacity = current?.kind === 'star' ? 0.28 : 0.12;
     for (const c of p.children) {
       if (!c.orbitLine) continue;
@@ -837,6 +872,8 @@ function frame() {
   simTime += dt;
   sunMaterial.uniforms.uTime.value = simTime;
   stars.material.uniforms.uTime.value = simTime;
+  solarWind.material.uniforms.uTime.value = simTime;
+  prominences.userData.update(simTime);
   film.uniforms.uTime.value = simTime;
   corona.material.rotation = simTime * 0.01;
   if (!nova) corona.scale.setScalar(SUN_RADIUS * 5 * (1 + Math.sin(simTime * 0.7) * 0.02));

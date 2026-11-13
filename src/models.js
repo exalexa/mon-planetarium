@@ -405,3 +405,61 @@ export function createRing(inner, outer, color = 0xc9b8ff, count = 2500) {
   x.fillStyle = gr; x.fillRect(0, 0, 32, 32);
   return new THREE.Points(geo, new THREE.PointsMaterial({ color, size: 0.22, map: new THREE.CanvasTexture(c), transparent: true, opacity: 0.55, depthWrite: false }));
 }
+
+// Géante gazeuse ou de glace : bandes nuageuses selon la latitude, turbulences, éventuelle tempête
+export function createGasGiant({ radius, colors, seed = 1, turbulence = 0.35, bands = 9, storm = null }) {
+  const geo = new THREE.SphereGeometry(radius, 128, 80);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const v = new THREE.Vector3();
+  const c = new THREE.Color(), c2 = new THREE.Color();
+  const pal = colors.map((x) => new THREE.Color(x));
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    const n = fbm3(v.x * 3 + seed, v.y * 6, v.z * 3 - seed);
+    const lat = Math.asin(v.y) + (n - 0.5) * turbulence;
+    const b = (Math.sin(lat * bands) * 0.5 + 0.5) * (pal.length - 1);
+    const k = Math.min(pal.length - 2, Math.floor(b));
+    c.copy(pal[k]).lerp(pal[k + 1], b - k);
+    if (storm) {
+      const d = v.distanceTo(storm.dir);
+      if (d < storm.size) c.lerp(c2.set(storm.color), Math.pow(1 - d / storm.size, 0.7));
+    }
+    cols.set([c.r, c.g, c.b], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })));
+  return g;
+}
+
+// Anneaux plats à bandes (coordonnées de texture radiales) + poussière scintillante
+export function createPlanetRing(inner, outer, { colors = ['#d8cfe8', '#b9aedb', '#efe6ff'], opacity = 0.85, dust = true } = {}) {
+  const geo = new THREE.RingGeometry(inner, outer, 160, 1);
+  const pos = geo.attributes.position, uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const r = Math.hypot(pos.getX(i), pos.getY(i));
+    uv.setXY(i, (r - inner) / (outer - inner), 0.5);
+  }
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 4;
+  const x = cv.getContext('2d');
+  let s = 17;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let px = 0; px < 512; px++) {
+    const k = px / 512;
+    // Divisions (lacunes) façon Cassini
+    const gap = (k > 0.58 && k < 0.63) || (k > 0.88 && k < 0.9);
+    const a = gap ? 0.05 : (0.35 + rnd() * 0.5) * Math.sin(Math.PI * Math.min(1, k * 1.05 + 0.02));
+    x.fillStyle = colors[Math.floor(rnd() * colors.length)];
+    x.globalAlpha = Math.max(0, a);
+    x.fillRect(px, 0, 1, 4);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const ring = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false, roughness: 1 }));
+  ring.rotation.x = -Math.PI / 2;
+  const g = new THREE.Group();
+  g.add(ring);
+  if (dust) g.add(createRing(inner * 1.02, outer * 0.98, 0xe9e0ff, 1800));
+  return g;
+}

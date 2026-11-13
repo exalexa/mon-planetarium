@@ -493,3 +493,150 @@ export function createGalaxies(radius = 8000, count = 9) {
   }
   return g;
 }
+
+// --- Vent solaire : flux de particules en spirale de Parker (le soleil tourne pendant que le plasma s'éloigne) ---
+export function createSolarWind({ sunRadius, maxRadius = 1100, count = 7000, streams = 70 } = {}) {
+  let s = 77;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const dirs = [];
+  for (let i = 0; i < streams; i++) {
+    // Flux concentrés près du plan de l'écliptique (vent lent) avec quelques flux rapides en hautes latitudes
+    const fast = rnd() < 0.25;
+    const lat = (rnd() - 0.5) * (fast ? 2.2 : 0.6);
+    const lon = rnd() * Math.PI * 2;
+    dirs.push({ lat, lon, speed: fast ? 120 + rnd() * 40 : 60 + rnd() * 25 });
+  }
+  const aDir = new Float32Array(count * 3);
+  const aPhase = new Float32Array(count);
+  const aSpeed = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const st = dirs[i % streams];
+    const lat = st.lat + (rnd() - 0.5) * 0.06, lon = st.lon + (rnd() - 0.5) * 0.06;
+    aDir.set([Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)], i * 3);
+    aPhase[i] = rnd();
+    aSpeed[i] = st.speed * (0.9 + rnd() * 0.2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
+  geo.setAttribute('aPhase', new THREE.BufferAttribute(aPhase, 1));
+  geo.setAttribute('aSpeed', new THREE.BufferAttribute(aSpeed, 1));
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uR: { value: sunRadius }, uMax: { value: maxRadius }, uOmega: { value: 0.08 }, uPixelRatio: { value: 1 } },
+    vertexShader: /* glsl */ `
+      attribute vec3 aDir; attribute float aPhase; attribute float aSpeed;
+      uniform float uTime, uR, uMax, uOmega, uPixelRatio;
+      varying float vA;
+      void main() {
+        float span = uMax - uR;
+        float r = uR + mod(uTime * aSpeed + aPhase * span, span);
+        // Spirale de Parker : l'angle recule de Ω·(r − R)/v
+        float a = -uOmega * (r - uR) / aSpeed;
+        vec3 d = vec3(aDir.x * cos(a) - aDir.z * sin(a), aDir.y, aDir.x * sin(a) + aDir.z * cos(a));
+        vec4 mv = modelViewMatrix * vec4(d * r, 1.0);
+        gl_Position = projectionMatrix * mv;
+        float k = (r - uR) / span;
+        vA = smoothstep(0.0, 0.04, k) * pow(1.0 - k, 1.6);
+        gl_PointSize = clamp(260.0 / -mv.z, 1.0, 3.5) * uPixelRatio;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      varying float vA;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float m = smoothstep(0.5, 0.0, d);
+        gl_FragColor = vec4(vec3(1.0, 0.82, 0.58) * m * vA * 0.55, 1.0);
+      }
+    `,
+  });
+  const pts = new THREE.Points(geo, material);
+  pts.frustumCulled = false;
+  return pts;
+}
+
+// --- Protubérances : boucles de plasma ancrées à la surface du soleil ---
+export function createProminences(R, count = 7) {
+  const g = new THREE.Group();
+  let s = 31;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < count; i++) {
+    const size = R * (0.12 + rnd() * 0.16);
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 0.9, 0.3), transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(size, size * 0.09, 8, 32, Math.PI), mat);
+    const dir = new THREE.Vector3(rnd() - 0.5, (rnd() - 0.5) * 0.9, rnd() - 0.5).normalize();
+    const holder = new THREE.Group();
+    holder.position.copy(dir).multiplyScalar(R * 0.97);
+    holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    holder.rotateY(rnd() * Math.PI);
+    holder.add(arc);
+    holder.userData = { phase: rnd() * 10, period: 14 + rnd() * 16, size };
+    g.add(holder);
+  }
+  g.userData.update = (t) => {
+    g.children.forEach((h) => {
+      const { phase, period } = h.userData;
+      const k = ((t + phase * period) % period) / period; // cycle de vie
+      const grow = Math.sin(Math.min(1, k * 1.4) * Math.PI);
+      h.scale.set(1, 0.4 + grow * 0.9, 1);
+      h.children[0].material.opacity = 0.85 * Math.sin(k * Math.PI);
+    });
+  };
+  return g;
+}
+
+// --- Comète : noyau, chevelure et deux queues (ions, bleutée et droite ; poussières, dorée et large) ---
+function tailMesh(length, radius, color) {
+  const geo = new THREE.ConeGeometry(radius, length, 20, 8, true);
+  geo.translate(0, -length / 2, 0); // la pointe du cône à l'origine, la queue vers −Y
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const c = new THREE.Color(color);
+  for (let i = 0; i < pos.count; i++) {
+    const k = Math.pow(1 + pos.getY(i) / length, 1.8); // 1 près du noyau, 0 au bout
+    cols.set([c.r * k, c.g * k, c.b * k], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+}
+export function createComet() {
+  const g = new THREE.Group();
+  const nucleus = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshStandardMaterial({ color: 0x8c8780, flatShading: true }));
+  g.add(nucleus);
+  const coma = createBeacon(14, '#bfe6ff');
+  coma.material.opacity = 0.7;
+  g.add(coma);
+  const tails = new THREE.Group();
+  const ion = tailMesh(1, 0.06, '#7fc8ff');
+  const dust = tailMesh(1, 0.16, '#ffd9a0');
+  dust.rotation.z = 0.12;
+  tails.add(ion, dust);
+  g.add(tails);
+  // Oriente les queues à l'opposé du soleil, longueur selon la distance
+  g.userData.update = (sunPos) => {
+    const away = g.position.clone().sub(sunPos);
+    const r = away.length();
+    away.normalize();
+    tails.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), away);
+    const L = THREE.MathUtils.clamp(9000 / r, 6, 140);
+    ion.scale.set(L * 0.9, L, L * 0.9);
+    dust.scale.set(L * 0.8, L * 0.7, L * 0.8);
+    coma.scale.setScalar(THREE.MathUtils.clamp(2400 / r, 4, 26));
+  };
+  return g;
+}
+
+// --- Repère de planète pour la vue d'ensemble (point lumineux de taille fixe à l'écran) ---
+export function createMapDot(color) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, color); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: false }));
+  sp.scale.setScalar(0.018);
+  return sp;
+}

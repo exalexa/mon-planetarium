@@ -14,6 +14,7 @@ export const TEXTS = {
       <li><kbd>glisser</kbd> tourner autour d'un astre, <kbd>molette</kbd> zoomer</li>
     </ul>
     <p>Vous pouvez aussi cliquer sur un astre, ou utiliser le journal à droite : il garde la trace de ce que vous avez déjà exploré.</p>
+    <p class="log-muted">L'architecture s'inspire du système solaire, à échelle compressée : planètes rocheuses, ceinture d'astéroïdes, géantes, ceinture de Kuiper. Les orbites suivent les lois de Kepler, avec les excentricités, inclinaisons et axes de rotation des vraies planètes. Le vent solaire s'enroule en spirale de Parker, et une comète passe de temps en temps.</p>
     <p class="log-note">Le soleil est stable. Pour l'instant.</p>`,
 
   // ----- PERSION · profil -----
