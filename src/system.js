@@ -51,7 +51,7 @@ export const SYSTEM = [
     view: { dist: 0.9 },
     children: [
       { id: 'sylvia', name: 'SYLVIA', section: "Centres d'intérêt", glb: 'Feuilles002', attached: true, view: { radius: 3.2, surface: true } },
-      { id: 'petra', name: 'PETRA', section: 'Compétences et langues', glb: 'Roche004', glbScale: 6, orbit: { a: 20, e: 0.055, i: 5.1, node: 0.0, peri: 1.0, M0: 0.0 } },
+      { id: 'petra', name: 'PETRA', section: 'Compétences et langues', glb: 'Roche004', glbScale: 4, orbit: { a: 20, e: 0.055, i: 5.1, node: 0.0, peri: 1.0, M0: 0.0 } },
     ],
   },
   {
@@ -62,11 +62,11 @@ export const SYSTEM = [
     atmosphere: { color: '#ffb27a', shell: 1.18, radius: 3.25 },
     view: { dist: 1.4 },
     children: [
-      { id: 'simulx', name: 'SIMULX_5', section: 'Jumeau numérique · point L2', glb: 'Cube002', glbScale: 0.9, lagrange: { point: 'L2', Ax: 1.5, Ay: 6, Az: 4, period: 70, wz: 1 }, spin: 0.05 },
-      { id: 'glenos', name: 'GLÉNOS', section: "Prothèse d'épaule", build: () => { const g = M.glenoidImplant(); g.scale.setScalar(0.6); return g; }, radius: 1.4, orbit: { a: 9, e: 0.015, i: 1.1, node: 2.7, peri: 2.4, M0: 1.6 }, spin: 0.25 },
-      { id: 'enedis', name: 'ENEDIS', section: 'Data Challenge', landmark: L.enedisPylon, moon: { seed: 31, scale: 0.4, ground: 0x7e9f5a, colors: [0x4f5a52, 0x6a7a66, 0x8fa284] }, orbit: { a: 12.5, e: 0.0151, i: 1.08, node: 4.9, peri: 3.6, M0: 2.9 } },
-      { id: 'ricochet', name: 'RICOCHET', section: 'TIPE', build: () => M.ricochetMoon(1.5), radius: 1.5, view: { pitch: 0.8, dist: 1.15 }, orbit: { a: 16, e: 0.0003, i: 0.9, node: 0.7, peri: 4.7, M0: 4.1 }, spin: 0.04 },
-      { id: 'c4d3x', name: 'C4D3X', section: 'Code et projets personnels', glb: 'Cube013', glbScale: 0.7, orbit: { a: 20, e: 0.02, i: 1.8, node: 2.7, peri: 5.8, M0: 5.3 }, spin: 0.2 },
+      { id: 'simulx', name: 'SIMULX_5', section: 'Jumeau numérique · point L2', glb: 'Cube002', glbScale: 0.5, lagrange: { point: 'L2', Ax: 1.5, Ay: 6, Az: 4, period: 70, wz: 1 }, spin: 0.05 },
+      { id: 'glenos', name: 'GLÉNOS', section: "Prothèse d'épaule", landmark: L.implantLab, moon: { seed: 33, scale: 0.28, ground: 0x9fa58f, colors: [0x6d675f, 0x8a8378, 0xa9a194] }, orbit: { a: 9, e: 0.015, i: 1.1, node: 2.7, peri: 2.4, M0: 1.6 } },
+      { id: 'enedis', name: 'ENEDIS', section: 'Data Challenge', landmark: L.enedisPylon, moon: { seed: 31, scale: 0.3, ground: 0x7e9f5a, colors: [0x4f5a52, 0x6a7a66, 0x8fa284] }, orbit: { a: 12.5, e: 0.0151, i: 1.08, node: 4.9, peri: 3.6, M0: 2.9 } },
+      { id: 'ricochet', name: 'RICOCHET', section: 'TIPE', build: () => M.ricochetMoon(1.0), radius: 1.0, view: { pitch: 0.8, dist: 1.15 }, orbit: { a: 16, e: 0.0003, i: 0.9, node: 0.7, peri: 4.7, M0: 4.1 }, spin: 0.04 },
+      { id: 'c4d3x', name: 'C4D3X', section: 'Code et projets personnels', glb: 'Cube013', glbScale: 0.45, orbit: { a: 20, e: 0.02, i: 1.8, node: 2.7, peri: 5.8, M0: 5.3 }, spin: 0.2 },
     ],
   },
   // ---------- Dans la ceinture d'astéroïdes ----------
@@ -115,7 +115,7 @@ export const SYSTEM = [
     view: { dist: 1.1 },
     children: [
       { id: 'exp', name: 'EXP_//223', section: 'Photographie · point L3', glb: 'Cube', glbScale: 1.2, lagrange: { point: 'L3', Ax: 2, Ay: 14, Az: 4, period: 120, wz: 1 }, spin: 0.06 },
-      { id: 'nocturne', name: 'NOCTURNE', section: 'Musique', build: M.grandPiano, radius: 2.6, orbit: { a: 36, e: 0.0012, i: 0.3, node: 4.4, peri: 3.3, M0: 2.6 }, spin: 0.1 },
+      { id: 'nocturne', name: 'NOCTURNE', section: 'Musique', landmark: L.pianoStage, moon: { seed: 91, scale: 0.5, ground: 0x7d8f6a, colors: [0x6a6070, 0x857a8c, 0xa79bb0] }, orbit: { a: 36, e: 0.0012, i: 0.3, node: 4.4, peri: 3.3, M0: 2.6 } },
       { id: 'logex', name: 'LOG_EX', section: 'Transmission', glb: 'Cube012', glbScale: 1.3, orbit: { a: 46, e: 0.0039, i: 0.1, node: 1.2, peri: 5.0, M0: 4.4 }, spin: 0.05 },
     ],
   },

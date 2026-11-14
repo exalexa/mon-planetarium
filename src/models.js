@@ -513,22 +513,97 @@ export function createShip() {
   add(g, new THREE.SphereGeometry(0.035, 6, 6), glow(0xff5a4a, 3), -0.62, 0, 0.1);
   add(g, new THREE.SphereGeometry(0.035, 6, 6), glow(0x5aff8a, 3), 0.62, 0, 0.1);
   add(g, new THREE.SphereGeometry(0.03, 6, 6), glow(0xfff0c0, 4), 0.18, 0.68, -0.1);
-  // Flamme du réacteur
-  const flameGeo = new THREE.ConeGeometry(0.2, 1.4, 14, 1, true);
-  flameGeo.translate(0, 0.7, 0);
+  // Flammes : jet principal (dégradé bleu → orange), deux propulseurs latéraux, halo et gerbe d'étincelles
+  const flameMat = (inner, outer) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTime: { value: 0 }, uThrust: { value: 0.3 }, uInner: { value: new THREE.Color(...inner) }, uOuter: { value: new THREE.Color(...outer) } },
+    vertexShader: /* glsl */ `
+      uniform float uTime, uThrust; varying float vL; varying vec3 vN; varying vec3 vV;
+      void main() {
+        vec3 p = position;
+        vL = clamp(-p.z / 1.6, 0.0, 1.0);
+        // Ondulation de la flamme
+        float w = sin(uTime * 38.0 + p.z * 9.0) * 0.04 + sin(uTime * 23.0 - p.z * 5.0) * 0.03;
+        p.xy *= 1.0 + w * vL;
+        p.z *= 0.35 + uThrust * 0.9 + sin(uTime * 31.0) * 0.05 * uThrust;
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uThrust; uniform vec3 uInner, uOuter; varying float vL; varying vec3 vN; varying vec3 vV;
+      void main() {
+        float core = abs(dot(vN, vV));
+        vec3 col = mix(uInner, uOuter, smoothstep(0.05, 0.6, vL));
+        float a = pow(core, 1.5) * (1.0 - vL) * (0.4 + 0.8 * uThrust);
+        gl_FragColor = vec4(col * a * 2.2, 1.0);
+      }
+    `,
+  });
+  const flameGeo = new THREE.ConeGeometry(0.24, 1.6, 20, 6, true);
+  flameGeo.translate(0, 0.8, 0);
   flameGeo.rotateX(-Math.PI / 2); // base contre la tuyère, pointe vers l'arrière (−Z)
-  const flame = new THREE.Mesh(flameGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.2, 0.5), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false }));
-  flame.position.z = -0.92;
-  g.add(flame);
-  const core = new THREE.Mesh(flameGeo.clone(), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 2.0, 2.6), transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
-  core.scale.set(0.45, 0.45, 0.6);
-  core.position.z = -0.92;
-  g.add(core);
+  const main = new THREE.Mesh(flameGeo, flameMat([0.7, 0.85, 1.6], [1.6, 0.55, 0.15]));
+  main.position.z = -0.92;
+  g.add(main);
+  const inner = new THREE.Mesh(flameGeo.clone(), flameMat([1.4, 1.6, 2.0], [1.4, 0.9, 0.4]));
+  inner.scale.set(0.45, 0.45, 0.6);
+  inner.position.z = -0.92;
+  g.add(inner);
+  const sides = [-1, 1].map((sx) => {
+    const f = new THREE.Mesh(flameGeo.clone(), flameMat([0.9, 0.9, 1.5], [1.4, 0.5, 0.2]));
+    f.scale.set(0.35, 0.35, 0.45);
+    f.position.set(sx * 0.55, 0.05, -0.66);
+    g.add(f);
+    return f;
+  });
+  // Halo de tuyère
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ color: new THREE.Color(1.6, 0.9, 0.5), transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }));
+  {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const x = c.getContext('2d'); const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+    halo.material.map = new THREE.CanvasTexture(c);
+  }
+  halo.position.z = -1.0;
+  halo.scale.setScalar(0.9);
+  g.add(halo);
+  // Étincelles : particules procédurales éjectées vers l'arrière
+  const N = 160;
+  const seeds = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) seeds.set([Math.random(), Math.random() - 0.5, Math.random() - 0.5], i * 3);
+  const sparkGeo = new THREE.BufferGeometry();
+  sparkGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+  sparkGeo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 3));
+  const sparkMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uThrust: { value: 0.3 } },
+    vertexShader: /* glsl */ `
+      attribute vec3 aSeed; uniform float uTime, uThrust; varying float vA;
+      void main() {
+        float t = fract(aSeed.x + uTime * 1.8);
+        vec3 p = vec3(aSeed.y * 0.25 * (1.0 + t * 2.0), aSeed.z * 0.25 * (1.0 + t * 2.0), -0.95 - t * (1.0 + uThrust * 3.0));
+        vA = (1.0 - t) * uThrust;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(18.0 / -mv.z, 1.0, 6.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      varying float vA;
+      void main() { float d = length(gl_PointCoord - 0.5); gl_FragColor = vec4(vec3(1.0, 0.7, 0.35) * smoothstep(0.5, 0.0, d) * vA * 1.4, 1.0); }
+    `,
+  });
+  const sparks = new THREE.Points(sparkGeo, sparkMat);
+  sparks.frustumCulled = false;
+  g.add(sparks);
+  const mats = [main, inner, ...sides].map((m) => m.material).concat([sparkMat]);
   g.userData.setThrust = (k, t) => {
-    const f = 0.25 + k * (0.85 + 0.15 * Math.sin(t * 40));
-    flame.scale.set(0.6 + k * 0.5, 0.6 + k * 0.5, f * 1.6);
-    core.scale.set(0.45, 0.45, f * 0.9);
-    flame.material.opacity = 0.3 + 0.5 * k;
+    mats.forEach((m) => { m.uniforms.uTime.value = t; m.uniforms.uThrust.value = k; });
+    halo.material.opacity = 0.25 + 0.6 * k;
+    halo.scale.setScalar(0.6 + k * 0.8);
   };
   return g;
 }

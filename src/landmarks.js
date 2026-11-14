@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import {
   mulberry32, fbm3, mat, glow, add, box, cyl, cone, gableRoof, mansardRoof, windows, tree, pine,
+  grandPiano, glenoidImplant,
 } from './models.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -597,5 +598,66 @@ export function enedisPylon() {
       add(wires, cubeGeo, i % 5 === 2 || i % 7 === 4 ? filled : known, p.x, p.y, p.z);
     }
   };
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// NOCTURNE : un piano à queue sur une scène en plein air, kiosque et lampadaires
+// ---------------------------------------------------------------------------
+export function pianoStage() {
+  const g = new THREE.Group();
+  const st = structure(g, 0, 0);
+  // Estrade ronde en bois
+  cyl(st, 1.05, 1.1, 0.12, 24, mat(0x8a5a36), 0, 0, 0);
+  cyl(st, 1.08, 1.08, 0.025, 24, mat(0xd8b47a), 0, 0.12, 0);
+  // Conque acoustique (demi-coupole) derrière le piano
+  const shell = add(st, new THREE.SphereGeometry(1.0, 24, 10, Math.PI, Math.PI, 0, Math.PI / 2), mat(0xefe6d6, { side: THREE.DoubleSide }), 0, 0.14, -0.15);
+  shell.scale.set(1, 1.15, 0.85);
+  for (let i = 0; i < 5; i++) {
+    const rib = add(st, new THREE.TorusGeometry(1.0 - i * 0.001, 0.015, 4, 20, Math.PI), mat(0xd8c8a8), 0, 0.14, -0.15);
+    rib.rotation.set(0, (i / 4) * Math.PI - Math.PI / 2, 0);
+    rib.scale.set(1, 1.15, 0.85);
+  }
+  // Piano à queue
+  const pn = grandPiano();
+  pn.scale.setScalar(0.42);
+  pn.position.set(0, 0.14, 0.25);
+  pn.rotation.y = Math.PI;
+  st.add(pn);
+  // Banquette
+  box(st, 0.25, 0.1, 0.1, mat(0x1a1a1a), 0, 0.14, -0.05);
+  // Lampadaires
+  for (const [x, z] of [[-1.25, 0.6], [1.25, 0.6]]) {
+    const l = structure(g, x, z, 0, false);
+    cyl(l, 0.015, 0.02, 0.7, 6, mat(0x2b2b2b), 0, 0, 0);
+    add(l, new THREE.SphereGeometry(0.06, 8, 6), glow(0xffd28a, 3), 0, 0.74, 0);
+  }
+  for (const [x, z, sc] of [[-1.4, -0.9, 1.1], [1.45, -0.8, 1.0], [0.3, 1.5, 0.9]]) tree(structure(g, x, z, 0, false), 0, 0, 0, sc, 0x5a7d48);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// GLÉNOS : laboratoire de biomécanique, l'implant exposé en sculpture sur un socle
+// ---------------------------------------------------------------------------
+export function implantLab() {
+  const g = new THREE.Group();
+  // Socle et implant géant
+  const pd = structure(g, 0.35, 0.25);
+  cyl(pd, 0.32, 0.38, 0.22, 16, mat(0xd9d4ca), 0, 0, 0);
+  const im = glenoidImplant();
+  im.scale.setScalar(0.32);
+  im.position.set(0, 0.62, 0);
+  pd.add(im);
+  // Laboratoire : bâtiment bas et moderne, bandeau vitré, verrière
+  const lab = structure(g, -0.6, -0.55);
+  box(lab, 1.3, 0.45, 0.6, mat(0xecebe6), 0, 0, 0);
+  box(lab, 1.24, 0.12, 0.62, glow(0x9fd8ff, 0.7), 0, 0.2, 0);
+  box(lab, 0.5, 0.18, 0.4, glow(0xbfe8ff, 0.5), 0.3, 0.45, 0);
+  box(lab, 0.2, 0.3, 0.02, mat(0x2b3240), -0.4, 0, 0.31);
+  // Antenne de télémétrie
+  const ant = structure(g, 1.0, -0.6, 0, false);
+  cyl(ant, 0.02, 0.03, 0.6, 6, mat(0x9aa4ad), 0, 0, 0);
+  add(ant, new THREE.SphereGeometry(0.18, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3), mat(0xe8e8e8, { side: THREE.DoubleSide }), 0, 0.68, 0, [Math.PI * 0.8, 0, 0]);
+  for (const [x, z] of [[-1.3, 0.6], [1.2, 0.9]]) tree(structure(g, x, z, 0, false), 0, 0, 0, 1, 0x557f42);
   return g;
 }

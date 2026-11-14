@@ -12,7 +12,9 @@ export const TEXTS = {
       <li><kbd>↑</kbd><kbd>↓</kbd> changer de planète</li>
       <li><kbd>←</kbd><kbd>→</kbd> visiter ses satellites</li>
       <li><kbd>glisser</kbd> tourner autour d'un astre, <kbd>molette</kbd> zoomer</li>
+      <li><kbd>M</kbd> passer du pilote automatique (vue cockpit) au vol libre</li>
     </ul>
+    <p>En <b>pilote automatique</b>, le vaisseau vous emmène et le tableau de bord affiche la route. En <b>vol libre</b>, pilotez vous-même (<kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> ou <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, <kbd>Maj</kbd> pour accélérer) : les fiches s'ouvrent quand vous approchez d'un astre.</p>
     <p>Vous pouvez aussi cliquer sur un astre, ou utiliser le journal à droite : il garde la trace de ce que vous avez déjà exploré.</p>
     <p class="log-muted">L'architecture s'inspire du système solaire, à échelle compressée : planètes rocheuses, ceinture d'astéroïdes, géantes, ceinture de Kuiper. Les orbites suivent les lois de Kepler, avec les excentricités, inclinaisons et axes de rotation des vraies planètes. Le vent solaire s'enroule en spirale de Parker, et une comète passe de temps en temps.</p>
     <p class="log-note">Le soleil est stable. Pour l'instant.</p>`,
@@ -192,7 +194,8 @@ export const TEXTS = {
     <h2>Prothèse d'épaule</h2>
     <p>Conception d'un implant glénoïdien en polyéthylène UHMWPE pour limiter l'effet « rocking horse », le basculement de l'implant qui finit par le desceller.</p>
     <p>Modélisation sous CATIA, analyse par éléments finis sous Abaqus et essais in vivo.</p>
-    <p class="log-tags">CATIA · Abaqus · éléments finis</p>`,
+    <p class="log-tags">CATIA · Abaqus · éléments finis</p>
+    <p class="log-muted">Sur la petite lune GLÉNOS, l'implant est exposé en sculpture devant un laboratoire de biomécanique.</p>`,
 
   enedis: `
     <p class="log-kicker">PROXION · ENEDIS · ENSAM 2025-2026</p>
@@ -243,7 +246,8 @@ export const TEXTS = {
     <h2>Musique</h2>
     <p>Dix ans au Conservatoire à rayonnement régional de Rouen (2012-2022) : piano et musique de chambre (certificats d'études musicales), écriture et formation musicale.</p>
     <p>Je joue surtout le répertoire classique et romantique, et je compose avec l'aide de l'ordinateur.</p>
-    <p class="log-links"><a href="https://soundcloud.com/user-163788646-509251636" target="_blank" rel="noopener">SoundCloud</a></p>`,
+    <p class="log-links"><a href="https://soundcloud.com/user-163788646-509251636" target="_blank" rel="noopener">SoundCloud</a></p>
+    <p class="log-muted">Sur la lune NOCTURNE, le piano attend sur une scène en plein air, sous une conque acoustique.</p>`,
 
   logex: `
     <p class="log-kicker">MUSA · LOG_EX</p>

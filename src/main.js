@@ -67,8 +67,14 @@ const prominences = createProminences(SUN_RADIUS);
 scene.add(prominences);
 
 // Comète périodique sur une orbite très excentrique ; ses queues pointent à l'opposé du soleil
-const comet = { obj: createComet(), orbit: { a: 520, e: 0.86, i: 34, node: 2.2, peri: 1.0, M0: 0.15 } };
-scene.add(comet.obj);
+// Comètes périodiques (orbites très excentriques inspirées de comètes réelles, compressées)
+const COMETS = [
+  { name: 'Halley', orbit: { a: 560, e: 0.866, i: 162.3, node: 1.02, peri: 1.95, M0: 0.1 } },   // rétrograde
+  { name: 'Encke', orbit: { a: 300, e: 0.75, i: 11.8, node: 5.8, peri: 3.89, M0: 2.6 } },        // courte période
+  { name: 'Hale-Bopp', orbit: { a: 1500, e: 0.95, i: 89.4, node: 4.65, peri: 2.27, M0: 6.1 } },  // longue période
+  { name: 'Swift-Tuttle', orbit: { a: 820, e: 0.91, i: 113.5, node: 2.43, peri: 2.6, M0: 0.35 } },
+];
+COMETS.forEach((c) => { c.obj = createComet(); scene.add(c.obj); });
 
 // ω Centauri : amas globulaire lointain, fixé sur la sphère céleste (il suit la caméra comme les étoiles)
 const OMEGA_DIR = new THREE.Vector3(0.35, 0.8, -0.48).normalize();
@@ -91,8 +97,8 @@ trail.visible = false;
 scene.add(trail);
 
 // Éjections de masse coronale (deux en vol au plus)
-const cmes = [createCME(), createCME()].map((mesh) => {
-  mesh.material.uniforms.uPixelRatio.value = pixelRatio;
+const cmes = [0, 1].map(() => {
+  const mesh = createCME({ sunRadius: SUN_RADIUS, maxRadius: 1150 });
   scene.add(mesh);
   return { mesh, active: false, r: 0, dir: new THREE.Vector3(), hits: new Set(), target: null };
 });
@@ -423,9 +429,11 @@ function buildSystem(gltf) {
     }
   }
 
-  prepareOrbit(comet.orbit, GM_SUN);
-  comet.line = orbitLine(comet.orbit, '#bfe6ff', 0.07, true);
-  scene.add(comet.line);
+  COMETS.forEach((c) => {
+    prepareOrbit(c.orbit, GM_SUN);
+    c.line = orbitLine(c.orbit, '#bfe6ff', 0.06, true);
+    scene.add(c.line);
+  });
 
   placeBodies(0);
   for (const b of BODIES) if (b.obj && !b.sky) measure(b);
@@ -512,9 +520,11 @@ let simTime = 0;
 const tmpL = new THREE.Vector3();
 const ORIGIN = new THREE.Vector3();
 function placeBodies(dt) {
-  comet.orbit.M += comet.orbit.n * dt;
-  keplerPosition(comet.orbit, comet.obj.position);
-  comet.obj.userData.update(ORIGIN);
+  for (const c of COMETS) {
+    c.orbit.M += c.orbit.n * dt;
+    keplerPosition(c.orbit, c.obj.position);
+    c.obj.userData.update(ORIGIN);
+  }
   for (const p of SYSTEM) {
     if (p.kind === 'star' || !p.obj) continue;
     p.orbit.M += p.orbit.n * dt;
@@ -555,8 +565,8 @@ function placeBodies(dt) {
       } else if (c.spin) {
         c.obj.rotation.y += c.spin * dt;
       }
-      c.obj.userData.update?.(simTime);
-      c.obj.children.forEach((ch) => ch.userData.update?.(simTime));
+      if (!c.updaters) { c.updaters = []; c.obj.traverse((o) => { if (o.userData.update) c.updaters.push(o); }); }
+      c.updaters.forEach((o) => o.userData.update(simTime));
     }
   }
 }
@@ -613,17 +623,22 @@ function spawnCME() {
   swSay(target ? `Éjection de masse coronale en route vers ${target.name}` : 'Éjection de masse coronale', 'alert', 12);
 }
 let coronaFlare = 0;
+let windLevel = 0.5;
 function updateSpaceWeather(dt) {
   const wind = 0.5 + 0.25 * Math.sin(simTime * 0.13) + 0.15 * Math.sin(simTime * 0.37 + 1);
+  windLevel = wind + Math.max(0, ...MAGNETIC.map((p) => p.storm)) * 0.3;
   nextCME -= dt;
   if (nextCME <= 0) { spawnCME(); nextCME = 22 + Math.random() * 20; }
   coronaFlare = Math.max(0, coronaFlare - dt / 3);
+  solarWind.material.uniforms.uGain.value = 0.8 + wind * 0.5 + (cmes.some((c) => c.active) ? 0.3 : 0);
   for (const c of cmes) {
     if (!c.active) continue;
     c.r += c.speed * dt;
-    const u = c.mesh.material.uniforms;
-    u.uR.value = c.r;
-    u.uFade.value = THREE.MathUtils.smoothstep(c.r, SUN_RADIUS, SUN_RADIUS + 40) * (1 - THREE.MathUtils.smoothstep(c.r, 800, 1150));
+    const u = c.mesh.userData.uniforms;
+    u.uFront.value = (c.r - SUN_RADIUS) / (1150 - SUN_RADIUS);
+    u.uTime.value = simTime;
+    u.uFade.value = THREE.MathUtils.smoothstep(c.r, SUN_RADIUS, SUN_RADIUS + 30) * (1 - THREE.MathUtils.smoothstep(c.r, 850, 1150));
+    c.mesh.userData.cap.scale.setScalar(c.r);
     for (const p of MAGNETIC) {
       if (c.hits.has(p)) continue;
       const d = p.obj.position.length();
@@ -638,13 +653,15 @@ function updateSpaceWeather(dt) {
   const g = current ? groupOf(current) : null;
   for (const p of MAGNETIC) {
     p.storm = Math.max(0, p.storm - dt / 18);
-    p.aurora.userData.uniforms.uTime.value = simTime;
-    p.aurora.userData.uniforms.uIntensity.value = 0.12 + 0.22 * wind + 1.4 * p.storm;
+    const au = p.aurora.userData.uniforms;
+    au.uTime.value = simTime;
+    p.aurora.userData.setIntensity(0.14 + 0.22 * wind + 1.5 * p.storm);
     const mu = p.magneto.userData.uniforms;
     mu.uK.value = 0.15 + 0.2 * wind + 0.6 * p.storm;
-    // Direction du soleil dans le repère du dipôle
+    // Direction du soleil dans le repère du dipôle (sert à comprimer le champ et à décaler l'ovale auroral)
     p.mag.updateMatrixWorld();
     mu.uSun.value.copy(p.obj.position).negate().normalize().applyQuaternion(p.mag.getWorldQuaternion(qInv).invert());
+    au.uSun.value.copy(mu.uSun.value);
     const show = g === p && current.kind !== 'star' ? 0.16 : 0;
     mu.uOpacity.value += (show - mu.uOpacity.value) * Math.min(1, dt * 2);
     p.magneto.visible = mu.uOpacity.value > 0.01;
@@ -765,7 +782,8 @@ function updateCamera(dt) {
   const f = frameFor(current);
   const targetFov = f.fov ?? 50;
   let fov = targetFov;
-  ship.visible = trail.visible = false;
+  ship.visible = trail.visible = false; // en pilote automatique, on est dans le cockpit
+  autoThrust = 0.04;
   if (trans) {
     trans.t = Math.min(1, trans.t + dt / trans.dur);
     const s = smoother(trans.t);
@@ -774,32 +792,23 @@ function updateCamera(dt) {
     const c2 = f.approach ? f.pos.clone().addScaledVector(f.approach, 6) : f.pos.clone().addScaledVector(trans.lift, 0.5);
     const path = (x) => bezier(trans.from, c1, c2, f.pos, x);
     const P = path(s);
-    // Orientation de base : de l'orientation de départ vers celle qui vise la cible
+    camera.position.copy(P);
+    // Orientation : le vaisseau pivote vers sa route, file le nez dans la direction du trajet,
+    // puis se tourne vers l'astre en arrivant (moins de rotations parasites)
     mTmp.lookAt(P, f.look, UP);
-    qTmp.setFromRotationMatrix(mTmp);
-    const qBase = trans.qFrom.clone().slerp(qTmp, smoother(Math.min(1, trans.t * 1.08)));
-    // Vue à la troisième personne : le vaisseau file devant la caméra sur la trajectoire
-    const w = trans.d > 25 && !reduceMotion ? THREE.MathUtils.smoothstep(trans.t, 0.04, 0.2) * (1 - THREE.MathUtils.smoothstep(trans.t, 0.74, 0.92)) : 0;
-    if (w > 0.001) {
-      const T = path(Math.min(1, s + 0.01)).sub(P);
+    const qTarget = new THREE.Quaternion().setFromRotationMatrix(mTmp);
+    if (trans.d > 25 && !reduceMotion) {
+      const T = path(Math.min(1, s + 0.015)).sub(P);
       if (T.lengthSq() < 1e-8) T.copy(f.look).sub(P);
-      T.normalize();
-      const chase = THREE.MathUtils.clamp(trans.d * 0.02, 5, 13);
-      ship.position.copy(P).addScaledVector(T, chase).addScaledVector(UP, -chase * 0.1);
-      ship.lookAt(ship.position.clone().add(T));
-      ship.scale.setScalar(Math.max(0.001, w) * 0.9);
-      const speed = 30 * trans.t * trans.t * (1 - trans.t) * (1 - trans.t) / 1.875;
-      ship.userData.setThrust(THREE.MathUtils.clamp(speed * 1.6, 0.15, 1), simTime);
-      ship.visible = true;
-      camera.position.copy(P).addScaledVector(UP, chase * 0.18 * w);
-      mTmp.lookAt(camera.position, ship.position.clone().addScaledVector(T, chase * 1.5), UP);
-      qTmp.setFromRotationMatrix(mTmp);
-      camera.quaternion.copy(qBase).slerp(qTmp, w);
-      pushTrail(ship.position, w);
+      mTmp.lookAt(P, P.clone().add(T), UP);
+      const qPath = new THREE.Quaternion().setFromRotationMatrix(mTmp);
+      const a = THREE.MathUtils.smoothstep(trans.t, 0.0, 0.22);
+      const b = THREE.MathUtils.smoothstep(trans.t, 0.66, 0.97);
+      camera.quaternion.copy(trans.qFrom).slerp(qPath, a).slerp(qTarget, b);
     } else {
-      camera.position.copy(P);
-      camera.quaternion.copy(qBase);
+      camera.quaternion.copy(trans.qFrom).slerp(qTarget, smoother(Math.min(1, trans.t * 1.08)));
     }
+    autoThrust = 0.15 + 0.85 * Math.sin(Math.PI * Math.min(1, trans.t * 1.15));
     const zoomIn = smoother(THREE.MathUtils.clamp((trans.t - 0.55) / 0.45, 0, 1));
     fov = THREE.MathUtils.lerp(trans.fovFrom, targetFov, zoomIn) + Math.sin(s * Math.PI) * 3;
     look.copy(f.look);
@@ -809,20 +818,50 @@ function updateCamera(dt) {
     look.copy(f.look);
     camera.lookAt(look);
   }
-  // Décalage du point de fuite pour laisser l'astre entre le panneau et le journal
-  viewOffset.x += (viewOffset.tx - viewOffset.x) * Math.min(1, dt * 3);
-  viewOffset.y += (viewOffset.ty - viewOffset.y) * Math.min(1, dt * 3);
-  camera.fov = fov;
   camera.userData.baseFov = trans ? fov : targetFov;
   // Oculaire : masque circulaire une fois dans la lunette
   const inScope = current.telescope && (!trans || trans.t > 0.88);
   document.getElementById('eyepiece').classList.toggle('on', !!inScope);
+  document.body.classList.toggle('in-scope', !!inScope);
   // Dans l'oculaire, le fond de ciel nébuleux grossi devient un aplat : on le masque
   sky.visible = !inScope;
   if (inScope) document.getElementById('eyepiece').style.setProperty('--ex', `${window.innerWidth / 2 - viewOffset.x}px`);
+  applyProjection(dt, fov);
+}
+
+// Décalage du point de fuite pour laisser l'astre entre le panneau et le journal
+function applyProjection(dt, fov) {
+  viewOffset.x += (viewOffset.tx - viewOffset.x) * Math.min(1, dt * 3);
+  viewOffset.y += (viewOffset.ty - viewOffset.y) * Math.min(1, dt * 3);
+  camera.fov = fov;
   const w = window.innerWidth, h = window.innerHeight;
   camera.setViewOffset(w, h, viewOffset.x, viewOffset.y, w, h);
   camera.updateProjectionMatrix();
+}
+
+// ---------------------------------------------------------------------------
+// Tableau de bord du cockpit
+// ---------------------------------------------------------------------------
+let autoThrust = 0;
+let pendingFree = false;
+const lastCam = new THREE.Vector3();
+let camSpeed = 0;
+const UA = 190; // 1 UA = 190 unités de la scène
+const fmt = (x, d = 2) => x.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+function updateDashboard(dt) {
+  const v = camera.position.distanceTo(lastCam) / Math.max(dt, 1e-3);
+  lastCam.copy(camera.position);
+  camSpeed += (v - camSpeed) * Math.min(1, dt * 4);
+  if (mode !== 'auto' || !current) return;
+  const tgt = bodyCenter(current);
+  document.getElementById('dash-target').textContent = current.name;
+  document.getElementById('dash-status').textContent = trans ? 'Pilote auto : en route' : current.telescope ? 'À la lunette' : current.kind === 'star' ? 'Vue d’ensemble' : 'En orbite';
+  document.getElementById('dash-dist').textContent = current.telescope ? '≈ 17 000 al' : `${fmt(camera.position.distanceTo(tgt) / UA, 3)} UA`;
+  document.getElementById('dash-speed').textContent = `${fmt(camSpeed / UA, 2)} UA/s`;
+  // Distance au soleil, convertie par l'échelle d = 190 × UA^0,7
+  document.getElementById('dash-helio').textContent = `${fmt(Math.pow(camera.position.length() / UA, 1 / 0.7), 2)} UA`;
+  document.getElementById('dash-needle').style.transform = `rotate(${-110 + 220 * autoThrust}deg)`;
+  document.getElementById('dash-needle2').style.transform = `rotate(${-110 + 220 * THREE.MathUtils.clamp(windLevel, 0, 1)}deg)`;
 }
 
 // Traînée du réacteur
@@ -857,12 +896,225 @@ function computeViewOffset() {
   viewOffset.ty = 0;
 }
 
+
+// ---------------------------------------------------------------------------
+// Vol libre : pilotage manuel, caméra à la troisième personne
+// ---------------------------------------------------------------------------
+const MODE_KEY = 'sysE139.mode';
+let mode = 'auto';
+try { mode = localStorage.getItem(MODE_KEY) === 'free' ? 'free' : 'auto'; } catch (e) { /* ignore */ }
+const free = {
+  pos: new THREE.Vector3(), vel: new THREE.Vector3(), offset: new THREE.Vector3(),
+  anchor: null, target: null, near: null, keys: new Set(), dist: 8, camPos: new THREE.Vector3(), init: false,
+};
+const KEYMAP = {
+  KeyW: 'fwd', ArrowUp: 'fwd', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
+  Space: 'up', KeyC: 'down', ControlLeft: 'down', ShiftLeft: 'boost', ShiftRight: 'boost',
+};
+function bodyRadius(b) { return b.atmosphere?.radius || b.radius || b.viewRadius || 2; }
+// Corps dont l'influence domine à cet endroit : le vaisseau « suit » alors son mouvement orbital
+function findAnchor(p) {
+  let best = null, bestK = Infinity;
+  for (const b of BODIES) {
+    if (!b.obj || b.sky || b.kind === 'star' || b.attached) continue;
+    const R = bodyRadius(b);
+    const infl = b.kind === 'planet' ? Math.max(R * 10, 40) : R * 6 + 8;
+    const d = bodyCenter(b, tmpV).distanceTo(p);
+    if (d < infl && d / infl < bestK) { best = b; bestK = d / infl; }
+  }
+  return best;
+}
+function findNear(p) {
+  let best = null, bestD = Infinity;
+  for (const b of BODIES) {
+    if (!b.obj || b.sky || b.kind === 'star') continue;
+    const R = b.attached ? 2 : bodyRadius(b);
+    const range = b.kind === 'planet' ? R * 4 + 10 : R * 5 + 5;
+    const d = bodyCenter(b, tmpV).distanceTo(p) - R;
+    if (d < range && d < bestD) { best = b; bestD = d; }
+  }
+  return best;
+}
+function enterFree() {
+  const fwd = camera.getWorldDirection(new THREE.Vector3());
+  free.pos.copy(camera.position).addScaledVector(fwd, 8);
+  free.vel.set(0, 0, 0);
+  free.anchor = findAnchor(free.pos);
+  if (free.anchor) free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
+  user.yaw = user.tYaw = Math.atan2(fwd.x, fwd.z);
+  user.pitch = user.tPitch = Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1));
+  free.camPos.copy(camera.position);
+  ship.position.copy(free.pos);
+  ship.lookAt(free.pos.clone().add(fwd));
+  ship.scale.setScalar(0.9);
+  trans = null;
+  trail.userData.n = 0;
+  free.init = true;
+}
+function setMode(m, silent = false) {
+  if (m === mode && !silent) return;
+  mode = m;
+  try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* ignore */ }
+  document.body.classList.toggle('cockpit', m === 'auto');
+  document.body.classList.toggle('free', m === 'free');
+  document.querySelectorAll('#mode-switch button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
+  if (silent || !ready) return;
+  if (m === 'free') {
+    enterFree();
+  } else {
+    // Retour au pilote automatique : on rejoint l'astre le plus proche
+    const n = findNear(ship.position) || findAnchor(ship.position) || byId.lexa;
+    free.keys.clear();
+    goTo(n.id, true);
+  }
+}
+document.getElementById('mode-switch').addEventListener('click', (e) => {
+  const m = e.target.closest('button')?.dataset.mode;
+  if (m) setMode(m);
+});
+// Commandes tactiles
+document.querySelectorAll('#flight-pad button').forEach((btn) => {
+  const k = btn.dataset.key;
+  btn.addEventListener('pointerdown', (e) => { e.preventDefault(); free.keys.add(k); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, () => free.keys.delete(k)));
+});
+
+const fwdV = new THREE.Vector3(), rightV = new THREE.Vector3(), inputV = new THREE.Vector3();
+function updateFree(dt) {
+  user.yaw += (user.tYaw - user.yaw) * Math.min(1, dt * 8);
+  user.pitch += (user.tPitch - user.pitch) * Math.min(1, dt * 8);
+  // Référentiel : on suit l'astre dominant, comme un « alignement de vitesse » automatique
+  const prevAnchor = free.anchor;
+  if (prevAnchor) free.pos.copy(bodyCenter(prevAnchor)).add(free.offset);
+  const anchor = findAnchor(free.pos);
+  if (anchor !== prevAnchor) free.anchor = anchor;
+  // Commandes
+  fwdV.set(Math.sin(user.yaw) * Math.cos(user.pitch), Math.sin(user.pitch), Math.cos(user.yaw) * Math.cos(user.pitch));
+  rightV.crossVectors(fwdV, UP).normalize();
+  const k = free.keys;
+  inputV.set(0, 0, 0)
+    .addScaledVector(fwdV, (k.has('fwd') ? 1 : 0) - (k.has('back') ? 1 : 0))
+    .addScaledVector(rightV, (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0))
+    .addScaledVector(UP, (k.has('up') ? 1 : 0) - (k.has('down') ? 1 : 0));
+  const thrusting = inputV.lengthSq() > 0;
+  if (thrusting) inputV.normalize();
+  const boost = k.has('boost');
+  const accel = boost ? 220 : 26;
+  free.vel.addScaledVector(inputV, accel * dt);
+  free.vel.multiplyScalar(Math.exp(-dt * (thrusting ? 0.35 : 1.1)));
+  const vmax = boost ? 420 : 40;
+  if (free.vel.length() > vmax) free.vel.setLength(vmax);
+  free.pos.addScaledVector(free.vel, dt);
+  // Collisions : on ne traverse ni le soleil ni les astres
+  if (free.pos.length() < SUN_RADIUS * 1.35) free.pos.setLength(SUN_RADIUS * 1.35);
+  for (const b of BODIES) {
+    if (!b.obj || b.sky || b.kind === 'star' || b.attached) continue;
+    const c = bodyCenter(b, tmpV);
+    const minD = bodyRadius(b) * 1.15 + 0.6;
+    const d = free.pos.distanceTo(c);
+    if (d < minD) {
+      const n = free.pos.clone().sub(c).normalize();
+      free.pos.copy(c).addScaledVector(n, minD);
+      const vn = free.vel.dot(n);
+      if (vn < 0) free.vel.addScaledVector(n, -vn);
+    }
+  }
+  if (free.anchor) free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
+  // Vaisseau : il s'oriente dans la direction visée
+  ship.visible = true;
+  ship.position.copy(free.pos);
+  const aim = thrusting && inputV.dot(fwdV) > -0.2 ? fwdV : (free.vel.lengthSq() > 1 ? free.vel.clone().normalize() : fwdV);
+  mTmp.lookAt(free.pos.clone().add(aim), free.pos, UP);
+  qTmp.setFromRotationMatrix(mTmp);
+  ship.quaternion.slerp(qTmp, Math.min(1, dt * 4));
+  const thr = thrusting ? (boost ? 1 : 0.6) : 0.1;
+  ship.userData.setThrust(thr, simTime);
+  autoThrust = thr;
+  pushTrail(ship.localToWorld(new THREE.Vector3(0, 0, -1.1)), thrusting ? (boost ? 1 : 0.6) : 0.2);
+  // Caméra derrière et au-dessus du vaisseau
+  const camWant = free.pos.clone().addScaledVector(fwdV, -free.dist).addScaledVector(UP, free.dist * 0.28);
+  if (free.anchor) {
+    // dans le référentiel de l'astre, pour éviter le tremblement dû à son orbite
+    free.camPos.add(bodyCenter(free.anchor).sub(free.lastAnchorPos || bodyCenter(free.anchor)));
+  }
+  free.lastAnchorPos = free.anchor ? bodyCenter(free.anchor) : null;
+  free.camPos.lerp(camWant, 1 - Math.exp(-dt * 9));
+  camera.position.copy(free.camPos);
+  camera.lookAt(free.pos.clone().addScaledVector(fwdV, free.dist * 0.8));
+  sky.visible = true;
+  document.getElementById('eyepiece').classList.remove('on');
+  document.body.classList.remove('in-scope');
+  // Proximité : on affiche la fiche de l'astre approché
+  const near = findNear(free.pos);
+  if (near !== free.near) {
+    free.near = near;
+    const nl = document.getElementById('near-label');
+    nl.classList.toggle('on', !!near);
+    if (near) {
+      nl.textContent = `À proximité : ${near.name} · ${near.section}`;
+      showBody(near);
+      if (free.target === near) free.target = null;
+    }
+  }
+  // Vitesse et référentiel
+  document.getElementById('free-speed').textContent = `${fmt(free.vel.length() / UA, 2)} UA/s${boost ? ' · propulsion rapide' : ''}${free.anchor ? ` · référentiel ${free.anchor.name}` : ''}`;
+  updateTargetMarker();
+  applyProjection(dt, 55);
+}
+
+// Repère de la cible (désignée en cliquant un astre ou une entrée du journal)
+function updateTargetMarker() {
+  const el = document.getElementById('target-marker');
+  const t = free.target;
+  if (!t || mode !== 'free') { el.classList.remove('on'); return; }
+  const c = bodyCenter(t);
+  const d = c.distanceTo(free.pos);
+  const p = c.clone().project(camera);
+  const w = window.innerWidth, h = window.innerHeight;
+  let x = (p.x * 0.5 + 0.5) * w, y = (-p.y * 0.5 + 0.5) * h;
+  const behind = p.z > 1;
+  const m = 40;
+  const inside = !behind && x > m && x < w - m && y > m && y < h - m;
+  if (!inside) {
+    // Cible hors champ : flèche sur le bord de l'écran
+    let dx = x - w / 2, dy = y - h / 2;
+    if (behind) { dx = -dx; dy = -dy; }
+    const k = Math.min((w / 2 - m) / Math.abs(dx || 1e-3), (h / 2 - m) / Math.abs(dy || 1e-3));
+    x = w / 2 + dx * k; y = h / 2 + dy * k;
+    el.style.setProperty('--rot', `${Math.atan2(dy, dx) * 180 / Math.PI + 45}deg`);
+  }
+  el.classList.add('on');
+  el.classList.toggle('edge', !inside);
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  document.getElementById('tm-label').textContent = `${t.name} · ${fmt(d / UA, 3)} UA`;
+}
+
 // ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
-function goTo(id) {
+// Affiche la fiche d'un astre sans déplacer la caméra (vol libre)
+function showBody(b) {
+  current = b;
+  explored.add(b.id);
+  saveExplored();
+  updateTree();
+  updateHud();
+  updatePanel();
+}
+function goTo(id, force = false) {
   const b = byId[id];
-  if (!b || !ready || b === current || overlayOpen) return;
+  if (!b || !ready || overlayOpen) return;
+  if (mode === 'free' && !force) {
+    // En vol libre, on désigne une cible au lieu de s'y rendre automatiquement
+    free.target = b.sky ? byId.meudon : b;
+    current = b;
+    updateTree();
+    updateHud();
+    updatePanel();
+    return;
+  }
+  if (b === current && !force) return;
   const first = !current;
   current = b;
   user.tYaw = user.tPitch = 0;
@@ -1005,9 +1257,17 @@ document.addEventListener('click', (e) => {
 window.addEventListener('keydown', (e) => {
   if (overlayOpen) { if (e.key === 'Escape') closeGallery(); return; }
   if (!current || e.target.closest?.('input, textarea')) return;
+  if (e.code === 'KeyM') { setMode(mode === 'auto' ? 'free' : 'auto'); return; }
+  if (mode === 'free') {
+    const k = KEYMAP[e.code];
+    if (k) { e.preventDefault(); free.keys.add(k); }
+    return;
+  }
   const k = { ArrowDown: () => stepPlanet(1), ArrowUp: () => stepPlanet(-1), ArrowRight: () => stepMoon(1), ArrowLeft: () => stepMoon(-1), Escape: () => goTo('lexa') }[e.key];
   if (k) { e.preventDefault(); k(); }
 });
+window.addEventListener('keyup', (e) => { const k = KEYMAP[e.code]; if (k) free.keys.delete(k); });
+window.addEventListener('blur', () => free.keys.clear());
 ui.nav.addEventListener('click', (e) => {
   const d = e.target.closest('button')?.dataset.nav;
   if (!d || !current) return;
@@ -1031,7 +1291,8 @@ canvas.addEventListener('pointermove', (e) => {
   pointer.moved += Math.abs(dx) + Math.abs(dy);
   pointer.x = e.clientX; pointer.y = e.clientY;
   user.tYaw -= dx * 0.005;
-  user.tPitch = THREE.MathUtils.clamp(user.tPitch + dy * 0.004, -1.1, 1.0);
+  if (mode === 'free') user.tPitch = THREE.MathUtils.clamp(user.tPitch - dy * 0.004, -1.45, 1.45);
+  else user.tPitch = THREE.MathUtils.clamp(user.tPitch + dy * 0.004, -1.1, 1.0);
   canvas.style.cursor = 'grabbing';
 });
 canvas.addEventListener('pointerup', (e) => {
@@ -1045,7 +1306,8 @@ canvas.addEventListener('pointerup', (e) => {
 });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  user.tZoom = THREE.MathUtils.clamp(user.tZoom * Math.exp(e.deltaY * 0.001), 0.45, 2.6);
+  if (mode === 'free') free.dist = THREE.MathUtils.clamp(free.dist * Math.exp(e.deltaY * 0.001), 3, 40);
+  else user.tZoom = THREE.MathUtils.clamp(user.tZoom * Math.exp(e.deltaY * 0.001), 0.45, 2.6);
 }, { passive: false });
 
 function pick(x, y) {
@@ -1099,7 +1361,10 @@ function frame() {
     placeBodies(dt);
     updateTelescope(dt);
     updateSpaceWeather(dt);
-    if (current) updateCamera(dt);
+    if (mode === 'free' && free.init) updateFree(dt);
+    else if (current) updateCamera(dt);
+    if (pendingFree && !trans && current) { pendingFree = false; setMode('free'); }
+    updateDashboard(dt);
     updateLabels();
     updateOrbits();
     updateLagrangeMarkers();
@@ -1127,8 +1392,12 @@ function onModelLoaded(gltf) {
     buildSystem(gltf);
     ui.loader.classList.add('hidden');
     setTimeout(() => ui.loader.remove(), 1400);
-    [ui.nav, ui.timer, tree, document.getElementById('space-weather')].forEach((el) => el.classList.add('visible'));
+    [ui.nav, ui.timer, tree, document.getElementById('space-weather'), document.getElementById('mode-switch')].forEach((el) => el.classList.add('visible'));
     const start = location.hash.slice(1);
+    // On démarre toujours en pilote automatique ; le vol libre reprend à la fin du premier trajet
+    pendingFree = mode === 'free';
+    mode = 'auto';
+    setMode('auto', true);
     goTo(byId[start] ? start : 'lexa');
 }
 function onModelError(err) {

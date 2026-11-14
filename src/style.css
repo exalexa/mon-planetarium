@@ -30,7 +30,7 @@ canvas#bg { position: fixed; inset: 0; display: block; cursor: grab; touch-actio
 /* ---------- Titre ---------- */
 #planetarium-title {
   position: fixed;
-  top: 34px;
+  top: 66px;
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
@@ -627,6 +627,148 @@ kbd {
 .project-photos img:nth-child(even) { transform: rotate(1.2deg); }
 
 #flash { position: fixed; inset: 0; background: #fffaf0; opacity: 0; pointer-events: none; z-index: 1500; }
+
+/* ---------- Choix du mode ---------- */
+#mode-switch {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  z-index: 980;
+  opacity: 0;
+  transition: opacity 0.6s, top 0.4s;
+}
+#mode-switch.visible { opacity: 1; }
+#mode-switch button {
+  padding: 6px 14px;
+  font-family: var(--round);
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+#mode-switch button.active { color: #24170c; background: var(--amber); }
+
+/* ---------- Cockpit ---------- */
+#cockpit { position: fixed; inset: 0; pointer-events: none; z-index: 600; opacity: 0; transition: opacity 0.8s ease; }
+body.cockpit #cockpit { opacity: 1; }
+body.cockpit #hud-nav { bottom: 150px; }
+body.cockpit.in-scope #cockpit { opacity: 0; }
+.cockpit-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dash {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+}
+.dash-screen {
+  min-width: 300px;
+  padding: 10px 16px;
+  font-family: var(--round);
+  font-size: 0.78rem;
+  color: #ffcf96;
+  background: radial-gradient(ellipse at 50% 40%, rgba(60, 30, 10, 0.95), rgba(18, 10, 5, 0.98));
+  border: 2px solid #5a3a22;
+  border-radius: 10px;
+  box-shadow: inset 0 0 18px rgba(255, 140, 60, 0.18), 0 0 0 3px #2a1a10;
+  text-shadow: 0 0 6px rgba(255, 150, 60, 0.6);
+}
+.dash-row { display: flex; justify-content: space-between; gap: 18px; line-height: 1.55; }
+.dash-row span { color: #c9935e; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.66rem; }
+.dash-row b { font-weight: 800; }
+.dash-gauge {
+  position: relative;
+  width: 78px;
+  height: 78px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #f3e6cc 0 55%, #d8c39b 56% 62%, #3a2a1c 63%);
+  box-shadow: 0 0 0 4px #2a1a10, inset 0 0 8px rgba(0, 0, 0, 0.4);
+}
+.dash-gauge span { position: absolute; left: 0; right: 0; bottom: 14px; text-align: center; font-family: var(--round); font-size: 0.5rem; font-weight: 800; color: #6b4a2c; text-transform: uppercase; }
+.gauge-needle {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  width: 2px;
+  height: 25px;
+  margin-left: -1px;
+  background: #c0392b;
+  transform-origin: 50% 100%;
+  transform: rotate(-110deg);
+  transition: transform 0.25s;
+}
+/* Panneau d'infos comme un écran de bord */
+body.cockpit #astro-info-container {
+  background: radial-gradient(ellipse at 40% 30%, rgba(48, 26, 10, 0.94), rgba(16, 9, 5, 0.96));
+  border: 2px solid #5a3a22;
+  border-top: 2px solid #5a3a22;
+  box-shadow: inset 0 0 30px rgba(255, 140, 60, 0.12), 0 0 0 4px #24170e, 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+body.cockpit .panel-body { color: #f2cfa2; }
+body.cockpit .panel-body h2 { color: #ffe1b8; text-shadow: 0 0 10px rgba(255, 150, 60, 0.35); }
+body.cockpit .log-tags { color: #ffc27a; }
+
+/* ---------- Vol libre ---------- */
+#free-hud { position: fixed; inset: 0; pointer-events: none; z-index: 650; display: none; }
+body.free #free-hud { display: block; }
+body.free #hud-nav { display: none; }
+#target-marker { position: fixed; transform: translate(-50%, -50%); display: none; }
+#target-marker.on { display: block; }
+.tm-ring { display: block; width: 26px; height: 26px; border: 2px solid var(--amber); border-radius: 50%; box-shadow: 0 0 10px rgba(244, 168, 95, 0.6); }
+#target-marker.edge .tm-ring { border-radius: 4px; transform: rotate(var(--rot, 0deg)); border-left-color: transparent; border-bottom-color: transparent; }
+.tm-label { position: absolute; left: 50%; top: 32px; transform: translateX(-50%); white-space: nowrap; font-family: var(--round); font-size: 0.74rem; font-weight: 800; color: #ffe2bf; text-shadow: 0 1px 6px #000; }
+#near-label {
+  position: fixed;
+  left: 50%;
+  top: 70px;
+  transform: translateX(-50%);
+  padding: 4px 14px;
+  font-family: var(--round);
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #24170c;
+  background: var(--amber);
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+#near-label.on { opacity: 1; }
+#free-speed { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); font-family: var(--round); font-size: 0.8rem; font-weight: 800; color: var(--ink-soft); text-shadow: 0 1px 6px #000; }
+#free-help {
+  position: fixed;
+  left: 30px;
+  bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  max-width: 330px;
+  font-family: var(--round);
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+}
+#free-help b { color: var(--amber); }
+#free-help kbd { font-size: 0.68rem; min-width: 1.5em; padding: 0 0.3em; }
+#flight-pad { position: fixed; right: 24px; bottom: 110px; display: none; grid-template-columns: repeat(3, 48px); gap: 6px; pointer-events: auto; }
+#flight-pad button { height: 48px; font-size: 1rem; color: var(--amber); background: var(--paper); border: 1px solid var(--edge); border-radius: 12px; touch-action: none; }
+#flight-pad button.wide { grid-column: span 3; font-family: var(--round); font-weight: 800; font-size: 0.8rem; }
+@media (pointer: coarse) { #flight-pad { display: grid; } #free-help { display: none; } }
 
 /* ---------- Écrans moyens et mobiles ---------- */
 @media (max-width: 1100px) {
