@@ -203,8 +203,12 @@ export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, gro
 // Ailes classiques en pierre autour d'une cour d'honneur, toits d'ardoise à lucarnes,
 // chapelle Saint-Louis à façade blanche (deux ordres, baie en plein cintre, fronton, statues, escalier).
 // ---------------------------------------------------------------------------
-export function lyceeCorneille() {
+export function lyceeCorneille(R = 4) {
   const g = new THREE.Group();
+  // Cour d'honneur gravillonnée, qui épouse la sphère
+  const court = sphereBand(R, 0, 0.75, 0xd9cfba, 0.004);
+  court.userData.noDrape = true;
+  g.add(court);
   wing(structure(g, 0.15, -0.8), { len: 2.4, depth: 0.5, h: 0.82, floors: 3, dormersN: 8 });
   wing(structure(g, 1.15, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4 });
   wing(structure(g, -0.85, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4 });
@@ -302,7 +306,18 @@ export function abbayeCluny() {
   wing(cv, { len: 2.5, depth: 0.5, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 9 });
   box(cv, 0.5, 0.8, 0.56, mat(0xf2ebdc), 0, 0, 0);
   pediment(cv, 0.52, 0.16, 0.06, 0xf2ebdc, 0, 0.8, 0.22);
-  for (const [x, z, s] of [[-1.55, 0.3, 1.2], [1.7, -0.6, 1.1], [-1.4, -1.2, 1.0], [1.55, 0.9, 1.0]]) tree(structure(g, x, z, 0, false), 0, 0, 0, s, 0x4f7c3f);
+  // Farinier (XIIIe s.) : long bâtiment bas sous une très haute toiture de tuiles
+  const fa = structure(g, -1.25, -1.15, 0.5);
+  box(fa, 1.1, 0.42, 0.42, stone, 0, 0, 0);
+  gableRoof(fa, 1.1, 0.42, 0.42, mat(C.tile), 0, 0.42, 0);
+  for (const x of [-0.4, -0.2, 0, 0.2, 0.4]) box(fa, 0.07, 0.36, 0.06, stone, x, 0, 0.23);
+  // Tour des Fromages : tour carrée élancée
+  const tf = structure(g, 1.55, -0.95);
+  box(tf, 0.3, 1.25, 0.3, stone, 0, 0, 0);
+  for (const y of [0.4, 0.8]) box(tf, 0.05, 0.12, 0.02, dark, 0, y, 0.155);
+  box(tf, 0.34, 0.05, 0.34, mat(0xe2d2b2), 0, 1.25, 0);
+  cone(tf, 0.25, 0.25, 4, mat(C.tile), 0, 1.3, 0, [0, Math.PI / 4, 0]);
+  for (const [x, z, s] of [[-1.55, 0.3, 1.2], [1.7, 0.4, 1.1], [-0.2, -1.45, 1.0], [1.55, 0.9, 1.0]]) tree(structure(g, x, z, 0, false), 0, 0, 0, s, 0x4f7c3f);
   return g;
 }
 
@@ -479,11 +494,43 @@ export function observatoireMeudon() {
     w.rotation.y = a;
   }
   cyl(c, 0.66, 0.66, 0.05, 36, mat(0xf2ebdc), 0, 1.28, 0);
+  // Grande Coupole : coupole tournante, trappe à deux volets, grande lunette sur sa monture
+  const cp = new THREE.Group(); cp.name = 'coupole'; cp.position.set(0, 1.33, 0); c.add(cp);
+  const rot = new THREE.Group(); rot.name = 'coupole-rot'; cp.add(rot);
+  const GAP = 0.44;
   const domeMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ad, metalness: 0.5, roughness: 0.5, flatShading: true });
-  add(c, new THREE.SphereGeometry(0.64, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), domeMat, 0, 1.33, 0);
-  // Trappe d'observation
-  add(c, new THREE.SphereGeometry(0.646, 6, 10, -0.12, 0.24, 0.05, Math.PI / 2 - 0.05), mat(0x15181c), 0, 1.33, 0);
-  add(c, new THREE.SphereGeometry(0.05, 8, 6), mat(0x8e98a1), 0, 1.97, 0);
+  const shell = new THREE.SphereGeometry(0.64, 32, 12, Math.PI / 2 + GAP / 2, Math.PI * 2 - GAP, 0, Math.PI / 2);
+  rot.add(new THREE.Mesh(shell, domeMat));
+  rot.add(new THREE.Mesh(shell, new THREE.MeshStandardMaterial({ color: 0x2b2a2e, side: THREE.BackSide })));
+  // Nervures de la coupole
+  for (let i = 0; i < 12; i++) {
+    const a = Math.PI / 2 + GAP / 2 + ((Math.PI * 2 - GAP) * (i + 0.5)) / 12;
+    // Arc méridien du bord jusqu'au sommet, orienté vers l'azimut a
+    const holder = new THREE.Group(); holder.rotation.y = a + Math.PI;
+    holder.add(new THREE.Mesh(new THREE.TorusGeometry(0.645, 0.008, 4, 24, Math.PI / 2), mat(0x7d8790)));
+    rot.add(holder);
+  }
+  // Volets de la trappe (ils glissent sur la coupole à l'ouverture)
+  const shutterGeo = (start) => new THREE.SphereGeometry(0.652, 6, 12, start, GAP / 2 + 0.01, 0, Math.PI / 2 - 0.02);
+  const shA = new THREE.Mesh(shutterGeo(Math.PI / 2 - GAP / 2 - 0.005), domeMat); shA.name = 'shutter-a';
+  const shB = new THREE.Mesh(shutterGeo(Math.PI / 2 - 0.005), domeMat); shB.name = 'shutter-b';
+  rot.add(shA, shB);
+  rot.userData.gap = GAP;
+  // Plancher et grande lunette (double réfracteur, 16 m de focale dans la réalité)
+  add(rot, new THREE.CylinderGeometry(0.6, 0.6, 0.02, 32), mat(0x5a4636), 0, -0.02, 0);
+  cyl(rot, 0.05, 0.07, 0.3, 10, mat(0x3a3d40), 0, -0.02, 0);
+  const alt = new THREE.Group(); alt.name = 'tube-alt'; alt.position.set(0, 0.3, 0); rot.add(alt);
+  const tubeMat = mat(0x2d3a33);
+  const tube = new THREE.CylinderGeometry(0.055, 0.045, 0.95, 14);
+  tube.rotateX(Math.PI / 2);
+  alt.add(new THREE.Mesh(tube, tubeMat));
+  const tube2 = new THREE.CylinderGeometry(0.04, 0.035, 0.95, 12);
+  tube2.rotateX(Math.PI / 2);
+  const t2 = new THREE.Mesh(tube2, tubeMat); t2.position.set(0.09, 0, 0); alt.add(t2);
+  add(alt, new THREE.CylinderGeometry(0.06, 0.06, 0.05, 14), mat(0xb08a4a), 0, 0, 0.47, [Math.PI / 2, 0, 0]);
+  add(alt, new THREE.BoxGeometry(0.2, 0.06, 0.08), mat(0x3a3d40), 0.04, -0.06, 0);
+  // Point de vue : juste devant l'objectif, dans l'axe optique
+  const eye = new THREE.Object3D(); eye.name = 'eyepiece'; eye.position.set(0, 0, 0.53); alt.add(eye);
   // Terrasse à balustrade
   const t = structure(g, 0, 1.15);
   box(t, 2.6, 0.06, 0.5, mat(0xd8cfbd), 0, 0, 0);

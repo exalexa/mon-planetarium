@@ -123,7 +123,7 @@ export const TEXTS = {
     <p>Pendant mon stage, j'ai développé seul des outils et des méthodes de calcul, et manipulé de grands catalogues d'étoiles. J'aime apprendre vite de nouveaux concepts et de nouveaux environnements logiciels pour aborder des problèmes à la frontière de plusieurs disciplines.</p>
     <ul>
       <li><b>MEUDON</b> : le stage au LIRA</li>
-      <li><b>ω CEN</b> : la publication</li>
+      <li><b>ω CEN</b> : la publication, à observer dans la lunette de Meudon</li>
       <li><b>GAIA</b> : les données et les outils</li>
       <li><b>EUCLID</b> : mes thèmes de recherche</li>
     </ul>`,
@@ -137,12 +137,14 @@ export const TEXTS = {
     <p>Résultat : un article soumis en premier auteur (voir ω CEN).</p>`,
 
   omega: `
-    <p class="log-kicker">ASTRA · ω CEN</p>
-    <h2>Publication</h2>
+    <p class="log-kicker">ASTRA · MEUDON · grande lunette</p>
+    <h2>Publication : ω Centauri</h2>
     <p><i>Stirred, not shaken: Dislodging ω Centauri from the Sausage galaxy through bar resonances</i></p>
     <p class="log-muted">A. Mannu, C. F. P. Laporte, M. D. A. Orkney, Y. R. Khalil, B. Famaey · soumis à MNRAS, 2026</p>
-    <p>ω Centauri, l'amas globulaire le plus massif de la Voie lactée, serait le noyau d'une galaxie naine absorbée. L'article étudie comment les résonances de la barre galactique ont pu le détacher des débris de Gaia-Sausage-Enceladus.</p>
-    <p class="log-links"><a href="https://arxiv.org/abs/2610.07581" target="_blank" rel="noopener">arXiv:2610.07581 [astro-ph.GA]</a></p>`,
+    <p>ω Centauri, l'amas globulaire le plus massif de la Voie lactée (plusieurs millions d'étoiles, à environ 17 000 années-lumière), serait le noyau d'une galaxie naine absorbée. L'article étudie comment les résonances de la barre galactique ont pu le détacher des débris de Gaia-Sausage-Enceladus.</p>
+    <p class="log-links"><a href="https://arxiv.org/abs/2610.07581" target="_blank" rel="noopener">arXiv:2610.07581 [astro-ph.GA]</a></p>
+    <h3>Dans la lunette</h3>
+    <p class="log-muted">La coupole s'ouvre et la lunette suit l'amas : sa monture compense en continu la rotation de la lune et l'orbite d'ASTRA, comme un suivi sidéral. Clin d'œil : depuis le vrai Meudon, ω Centauri (déclinaison −47°) ne se lève jamais.</p>`,
 
   gaia: `
     <p class="log-kicker">ASTRA · GAIA</p>
@@ -252,6 +254,44 @@ export const TEXTS = {
       <li><span class="when">2024-25</span><b>Tutorat bénévole</b>, Cordées de la réussite <a href="https://artsetmetiers.fr/fr/actualites/campus-de-cluny-cordee-de-la-reussite-optim-avec-axel-mannu" target="_blank" rel="noopener">OPTIM</a>, auprès d'élèves de l'éducation prioritaire</li>
       <li><span class="when">2020-26</span><b>Cours particuliers</b> pour lycéens : mathématiques, physique, français, piano</li>
     </ul>`,
+
+  // ----- Planètes naines -----
+  ceres: `
+    <p class="log-kicker">Ceinture d'astéroïdes · planète naine</p>
+    <h2>Cérès</h2>
+    <p>Le plus gros objet de la ceinture principale, environ 940 km de diamètre, et la seule planète naine du système solaire intérieur.</p>
+    <p>La sonde Dawn l'a étudiée de 2015 à 2018 : les taches brillantes du cratère Occator sont des dépôts de sels, notamment de carbonate de sodium.</p>`,
+
+  pluton: `
+    <p class="log-kicker">Ceinture de Kuiper · planète naine</p>
+    <h2>Pluton</h2>
+    <p>Découverte en 1930 par Clyde Tombaugh, reclassée en planète naine par l'Union astronomique internationale en 2006.</p>
+    <p>La sonde New Horizons l'a survolée en juillet 2015 et révélé Tombaugh Regio, le grand « cœur » clair, dont la partie ouest est une plaine de glace d'azote, Spoutnik Planitia.</p>
+    <p class="log-muted">Son orbite est excentrique (e ≈ 0,25) et inclinée de 17°, en résonance 3:2 avec Neptune.</p>`,
+
+  charon: `
+    <p class="log-kicker">PLUTON · lune</p>
+    <h2>Charon</h2>
+    <p>Environ la moitié du diamètre de Pluton. Le centre de masse du couple se trouve hors de Pluton : les deux astres tournent l'un autour de l'autre comme un système double.</p>
+    <p>Leur rotation est mutuellement synchrone, en 6,4 jours : chacun montre toujours la même face à l'autre. La calotte rougeâtre du pôle nord s'appelle Mordor Macula.</p>`,
+
+  haumea: `
+    <p class="log-kicker">Ceinture de Kuiper · planète naine</p>
+    <h2>Hauméa</h2>
+    <p>Elle tourne sur elle-même en 3,9 heures environ, si vite qu'elle s'est aplatie en ellipsoïde allongé.</p>
+    <p>Un anneau a été découvert autour d'elle en 2017. Elle possède deux lunes, Hiʻiaka et Namaka.</p>`,
+
+  makemake: `
+    <p class="log-kicker">Ceinture de Kuiper · planète naine</p>
+    <h2>Makémaké</h2>
+    <p>Annoncée en 2005, nommée d'après le dieu créateur du peuple Rapa Nui. Sa surface rougeâtre est couverte de glaces, dont du méthane.</p>
+    <p>Une petite lune, surnommée MK2, a été repérée en 2016.</p>`,
+
+  eris: `
+    <p class="log-kicker">Disque des objets épars · planète naine</p>
+    <h2>Éris</h2>
+    <p>Découverte en 2005, plus massive que Pluton d'environ un quart. C'est elle qui a conduit l'Union astronomique internationale à définir le terme de planète naine en 2006.</p>
+    <p class="log-muted">Son orbite est inclinée de 44° et très excentrique : elle s'éloigne jusqu'à près de 98 UA du Soleil. Elle a une lune, Dysnomie.</p>`,
 };
 
 export const GALLERIES = {

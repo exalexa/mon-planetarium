@@ -27,6 +27,7 @@
     <div id="loop-timer" title="Le soleil est stable. Pour l'instant.">
       <span class="loop-sun"></span><span class="loop-label">Boucle</span><span id="loop-time">22:00</span>
     </div>
+    <div id="space-weather" aria-live="polite"><span class="sw-dot"></span><span id="sw-text">Vent solaire calme</span></div>
 
     <aside id="astro-info-container" aria-live="polite">
       <div class="panel-body"></div>
@@ -45,6 +46,16 @@
 
     <div id="project-overlay" role="dialog" aria-modal="true"></div>
     <div id="flash"></div>
+
+    <!-- Vue dans l'oculaire de la grande lunette -->
+    <div id="eyepiece" aria-hidden="true">
+      <div class="eyepiece-ring"></div>
+      <div class="eyepiece-info">
+        <span>Grande lunette · Meudon</span>
+        <span>ω Centauri · α 13h 26m 47s · δ −47° 28′ 46″</span>
+        <span class="eyepiece-track">Suivi sidéral actif</span>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

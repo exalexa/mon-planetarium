@@ -4,7 +4,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   createSky, createStarfield, createSunMaterial, createCorona, createAtmosphere, createComposer,
   createAsteroidBelt, createGalaxies, createSolarWind, createProminences, createComet, createMapDot,
+  createAurora, createMagnetosphere, createCME,
 } from './effects.js';
+import { createShip, globularCluster } from './models.js';
 import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
 import { TEXTS, GALLERIES } from './content.js';
@@ -67,6 +69,34 @@ scene.add(prominences);
 // Comète périodique sur une orbite très excentrique ; ses queues pointent à l'opposé du soleil
 const comet = { obj: createComet(), orbit: { a: 520, e: 0.86, i: 34, node: 2.2, peri: 1.0, M0: 0.15 } };
 scene.add(comet.obj);
+
+// ω Centauri : amas globulaire lointain, fixé sur la sphère céleste (il suit la caméra comme les étoiles)
+const OMEGA_DIR = new THREE.Vector3(0.35, 0.8, -0.48).normalize();
+const omegaCluster = globularCluster(31, 6000);
+omegaCluster.position.copy(OMEGA_DIR).multiplyScalar(6000);
+stars.add(omegaCluster);
+
+// Vaisseau d'exploration, visible pendant les trajets (caméra à la troisième personne)
+const ship = createShip();
+ship.visible = false;
+scene.add(ship);
+const TRAIL_N = 90;
+const trail = new THREE.Line(
+  new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 3), 3))
+    .setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 3), 3)),
+  new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+);
+trail.frustumCulled = false;
+trail.visible = false;
+scene.add(trail);
+
+// Éjections de masse coronale (deux en vol au plus)
+const cmes = [createCME(), createCME()].map((mesh) => {
+  mesh.material.uniforms.uPixelRatio.value = pixelRatio;
+  scene.add(mesh);
+  return { mesh, active: false, r: 0, dir: new THREE.Vector3(), hits: new Set(), target: null };
+});
+let nextCME = 14;
 
 const { composer, film } = createComposer(renderer, scene, camera);
 composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
@@ -312,6 +342,7 @@ function buildSystem(gltf) {
   rocket && [...rocket.children].filter((o) => o.userData.remove).forEach((o) => o.parent.remove(o));
 
   for (const b of BODIES) {
+    if (b.sky) continue;
     if (b.glb) {
       const obj = g.getObjectByName(b.glb) || scene.getObjectByName(b.glb);
       if (!obj) { console.warn('Objet introuvable dans le GLB :', b.glb); continue; }
@@ -341,10 +372,34 @@ function buildSystem(gltf) {
       b.obj.rotation.order = 'ZYX';
       b.obj.rotation.z = b.tilt || 0;
       b.mapDot = createMapDot(b.color);
+      if (b.dwarf) b.mapDot.scale.setScalar(0.011);
       scene.add(b.mapDot);
+    }
+    if (b.magnetic && b.obj) {
+      // Champ magnétique : dipôle incliné par rapport à l'axe de rotation, aurores aux pôles magnétiques
+      const R = b.atmosphere?.radius || b.radius || 6;
+      b.mag = new THREE.Group();
+      b.mag.rotation.order = 'ZYX';
+      b.mag.rotation.z = (b.tilt || 0) + b.magnetic.tilt;
+      b.aurora = createAurora(R * 1.03, { bottom: b.magnetic.bottom, top: b.magnetic.top });
+      b.magneto = createMagnetosphere(R, b.color);
+      b.mag.add(b.aurora, b.magneto);
+      b.storm = 0;
+      scene.add(b.mag);
     }
   }
   for (const b of BODIES) if (b.obj && b.kind !== 'star') toonify(b.obj);
+  toonify(ship);
+  // Grande lunette de Meudon : pièces animées
+  const mo = byId.meudon?.obj;
+  if (mo) {
+    tele = {
+      cp: mo.getObjectByName('coupole'), rot: mo.getObjectByName('coupole-rot'),
+      a: mo.getObjectByName('shutter-a'), b: mo.getObjectByName('shutter-b'),
+      alt: mo.getObjectByName('tube-alt'), eye: mo.getObjectByName('eyepiece'), open: 0,
+    };
+    tele.gap = tele.rot.userData.gap;
+  }
   belts.forEach((b) => { b.mesh.material = toToon(b.mesh.material); });
   // Pickables : parents d'abord, puis enfants attachés (SYLVIA dans PERSION)
   for (const b of BODIES) if (b.obj && !b.attached) tagPickable(b);
@@ -373,7 +428,7 @@ function buildSystem(gltf) {
   scene.add(comet.line);
 
   placeBodies(0);
-  for (const b of BODIES) if (b.obj) measure(b);
+  for (const b of BODIES) if (b.obj && !b.sky) measure(b);
   byId.lexa.viewRadius = SUN_RADIUS;
   ready = true;
 }
@@ -468,6 +523,7 @@ function placeBodies(dt) {
     // Rotation propre, bien visible depuis la caméra alignée
     p.obj.rotation.y += dt * (p.spin ?? 0.06);
     p.mapDot?.position.copy(p.obj.position);
+    p.mag?.position.copy(p.obj.position);
     for (const c of p.children) {
       if (!c.obj || c.attached) continue;
       if (c.lagrange) {
@@ -480,6 +536,13 @@ function placeBodies(dt) {
         c.obj.position.copy(haloLocal(l, l.phi, tmpV).applyMatrix4(B.m));
         c.orbitLine.matrix.copy(B.m);
         c.orbitLine.matrixWorldNeedsUpdate = true;
+      } else if (c.binary) {
+        // Système double : les deux corps tournent autour d'un barycentre commun
+        c.orbit.M += c.orbit.n * dt;
+        const k = keplerPosition(c.orbit, tmpV);
+        c.orbitLine?.position.copy(p.obj.position);
+        c.obj.position.copy(p.obj.position).addScaledVector(k, 1 - c.binary);
+        p.obj.position.addScaledVector(k, -c.binary);
       } else {
         c.orbit.M += c.orbit.n * dt;
         keplerPosition(c.orbit, c.obj.position).add(p.obj.position);
@@ -495,6 +558,103 @@ function placeBodies(dt) {
       c.obj.userData.update?.(simTime);
       c.obj.children.forEach((ch) => ch.userData.update?.(simTime));
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Grande lunette : la coupole tourne et la monture suit ω Cen (suivi sidéral)
+// ---------------------------------------------------------------------------
+let tele = null;
+const qInv = new THREE.Quaternion();
+function updateTelescope(dt) {
+  if (!tele) return;
+  byId.meudon.obj.updateMatrixWorld(true);
+  tele.cp.getWorldQuaternion(qInv).invert();
+  // Direction de l'amas dans le repère local de la coupole : la monture compense
+  // à chaque instant la rotation de la lune et le mouvement d'ASTRA
+  const d = OMEGA_DIR.clone().applyQuaternion(qInv);
+  tele.rot.rotation.y = Math.atan2(d.x, d.z);
+  tele.alt.rotation.x = -Math.max(0.05, Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)));
+  const target = current?.id === 'omega' ? 1 : 0;
+  tele.open += (target - tele.open) * Math.min(1, dt * 1.2);
+  tele.a.rotation.y = -tele.open * (tele.gap / 2 + 0.03);
+  tele.b.rotation.y = tele.open * (tele.gap / 2 + 0.03);
+}
+
+// ---------------------------------------------------------------------------
+// Météo spatiale : vent solaire variable, éjections de masse coronale, orages magnétiques
+// ---------------------------------------------------------------------------
+const MAGNETIC = BODIES.filter((b) => b.magnetic);
+let swMessage = '', swTimer = 0;
+function swSay(text, cls = '', duration = 9) {
+  swMessage = text; swTimer = duration;
+  const el = document.getElementById('space-weather');
+  document.getElementById('sw-text').textContent = text;
+  el.classList.toggle('alert', cls === 'alert');
+  el.classList.toggle('aurora', cls === 'aurora');
+}
+function spawnCME() {
+  const c = cmes.find((x) => !x.active);
+  if (!c) return;
+  const g = current ? groupOf(current) : null;
+  let target = null;
+  if (g?.magnetic && Math.random() < 0.65) target = g;
+  else if (Math.random() < 0.6) target = MAGNETIC[Math.floor(Math.random() * MAGNETIC.length)];
+  if (target) c.dir.copy(target.obj.position).normalize();
+  else c.dir.set(Math.random() - 0.5, (Math.random() - 0.5) * 0.3, Math.random() - 0.5).normalize();
+  c.target = target;
+  c.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), c.dir);
+  c.r = SUN_RADIUS;
+  c.speed = 105 + Math.random() * 40;
+  c.hits.clear();
+  c.active = true;
+  c.mesh.visible = true;
+  coronaFlare = 1;
+  swSay(target ? `Éjection de masse coronale en route vers ${target.name}` : 'Éjection de masse coronale', 'alert', 12);
+}
+let coronaFlare = 0;
+function updateSpaceWeather(dt) {
+  const wind = 0.5 + 0.25 * Math.sin(simTime * 0.13) + 0.15 * Math.sin(simTime * 0.37 + 1);
+  nextCME -= dt;
+  if (nextCME <= 0) { spawnCME(); nextCME = 22 + Math.random() * 20; }
+  coronaFlare = Math.max(0, coronaFlare - dt / 3);
+  for (const c of cmes) {
+    if (!c.active) continue;
+    c.r += c.speed * dt;
+    const u = c.mesh.material.uniforms;
+    u.uR.value = c.r;
+    u.uFade.value = THREE.MathUtils.smoothstep(c.r, SUN_RADIUS, SUN_RADIUS + 40) * (1 - THREE.MathUtils.smoothstep(c.r, 800, 1150));
+    for (const p of MAGNETIC) {
+      if (c.hits.has(p)) continue;
+      const d = p.obj.position.length();
+      if (c.r >= d - 8 && p.obj.position.clone().normalize().dot(c.dir) > Math.cos(0.5)) {
+        c.hits.add(p);
+        p.storm = 1;
+        swSay(`Orage géomagnétique : aurores sur ${p.name}`, 'aurora', 14);
+      }
+    }
+    if (c.r > 1150) { c.active = false; c.mesh.visible = false; }
+  }
+  const g = current ? groupOf(current) : null;
+  for (const p of MAGNETIC) {
+    p.storm = Math.max(0, p.storm - dt / 18);
+    p.aurora.userData.uniforms.uTime.value = simTime;
+    p.aurora.userData.uniforms.uIntensity.value = 0.12 + 0.22 * wind + 1.4 * p.storm;
+    const mu = p.magneto.userData.uniforms;
+    mu.uK.value = 0.15 + 0.2 * wind + 0.6 * p.storm;
+    // Direction du soleil dans le repère du dipôle
+    p.mag.updateMatrixWorld();
+    mu.uSun.value.copy(p.obj.position).negate().normalize().applyQuaternion(p.mag.getWorldQuaternion(qInv).invert());
+    const show = g === p && current.kind !== 'star' ? 0.16 : 0;
+    mu.uOpacity.value += (show - mu.uOpacity.value) * Math.min(1, dt * 2);
+    p.magneto.visible = mu.uOpacity.value > 0.01;
+  }
+  swTimer -= dt;
+  if (swTimer <= 0 && swMessage !== 'calme') {
+    swMessage = 'calme';
+    const el = document.getElementById('space-weather');
+    el.classList.remove('alert', 'aurora');
+    document.getElementById('sw-text').textContent = wind > 0.7 ? 'Vent solaire soutenu' : 'Vent solaire calme';
   }
 }
 
@@ -517,6 +677,11 @@ const UP = new THREE.Vector3(0, 1, 0);
 // un peu en retrait et en hauteur. L'astre n'est pas figé au centre : on vise un point
 // décalé vers son « parent », pour voir à la fois l'astre qui tourne et ce qui l'éclaire ou l'attire.
 function frameFor(b) {
+  if (b.telescope && tele) {
+    // Vue dans la lunette : la caméra se place à l'objectif et vise l'amas
+    const pos = tele.eye.getWorldPosition(new THREE.Vector3());
+    return { pos, look: pos.clone().addScaledVector(OMEGA_DIR, 100), fov: THREE.MathUtils.clamp(3.2 * user.zoom, 1.2, 9), approach: OMEGA_DIR };
+  }
   const center = bodyCenter(b);
   const portrait = Math.max(1, 1.05 / camera.aspect);
   if (b.kind === 'star') {
@@ -581,8 +746,10 @@ function startTransition(target) {
   // On part dans la direction du regard seulement si la cible est devant
   const fwd = camera.getWorldDirection(new THREE.Vector3());
   const ahead = Math.max(0, fwd.dot(seg.clone().normalize()));
+  trail.userData.n = 0;
   trans = {
-    from, lift, t: 0,
+    from, lift, t: 0, d,
+    fovFrom: camera.userData.baseFov ?? 50,
     qFrom: camera.quaternion.clone(),
     lead: fwd.multiplyScalar(d * 0.18 * ahead),
     dur: reduceMotion ? 0.01 : THREE.MathUtils.clamp(2.2 + d / 450, 2.2, 6.5),
@@ -596,18 +763,45 @@ function updateCamera(dt) {
   user.pitch += (user.tPitch - user.pitch) * Math.min(1, dt * 6);
   user.zoom += (user.tZoom - user.zoom) * Math.min(1, dt * 6);
   const f = frameFor(current);
-  let fov = 50;
+  const targetFov = f.fov ?? 50;
+  let fov = targetFov;
+  ship.visible = trail.visible = false;
   if (trans) {
     trans.t = Math.min(1, trans.t + dt / trans.dur);
     const s = smoother(trans.t);
     const c1 = trans.from.clone().add(trans.lead).add(trans.lift);
-    const c2 = f.pos.clone().addScaledVector(trans.lift, 0.5);
-    camera.position.copy(bezier(trans.from, c1, c2, f.pos, s));
-    // Orientation : on glisse de l'orientation de départ vers celle qui vise la cible
-    mTmp.lookAt(camera.position, f.look, UP);
+    // Vers la lunette : on entre par la trappe, dans l'axe de visée
+    const c2 = f.approach ? f.pos.clone().addScaledVector(f.approach, 6) : f.pos.clone().addScaledVector(trans.lift, 0.5);
+    const path = (x) => bezier(trans.from, c1, c2, f.pos, x);
+    const P = path(s);
+    // Orientation de base : de l'orientation de départ vers celle qui vise la cible
+    mTmp.lookAt(P, f.look, UP);
     qTmp.setFromRotationMatrix(mTmp);
-    camera.quaternion.copy(trans.qFrom).slerp(qTmp, smoother(Math.min(1, trans.t * 1.08)));
-    fov = 50 + Math.sin(s * Math.PI) * 3;
+    const qBase = trans.qFrom.clone().slerp(qTmp, smoother(Math.min(1, trans.t * 1.08)));
+    // Vue à la troisième personne : le vaisseau file devant la caméra sur la trajectoire
+    const w = trans.d > 25 && !reduceMotion ? THREE.MathUtils.smoothstep(trans.t, 0.04, 0.2) * (1 - THREE.MathUtils.smoothstep(trans.t, 0.74, 0.92)) : 0;
+    if (w > 0.001) {
+      const T = path(Math.min(1, s + 0.01)).sub(P);
+      if (T.lengthSq() < 1e-8) T.copy(f.look).sub(P);
+      T.normalize();
+      const chase = THREE.MathUtils.clamp(trans.d * 0.02, 5, 13);
+      ship.position.copy(P).addScaledVector(T, chase).addScaledVector(UP, -chase * 0.1);
+      ship.lookAt(ship.position.clone().add(T));
+      ship.scale.setScalar(Math.max(0.001, w) * 0.9);
+      const speed = 30 * trans.t * trans.t * (1 - trans.t) * (1 - trans.t) / 1.875;
+      ship.userData.setThrust(THREE.MathUtils.clamp(speed * 1.6, 0.15, 1), simTime);
+      ship.visible = true;
+      camera.position.copy(P).addScaledVector(UP, chase * 0.18 * w);
+      mTmp.lookAt(camera.position, ship.position.clone().addScaledVector(T, chase * 1.5), UP);
+      qTmp.setFromRotationMatrix(mTmp);
+      camera.quaternion.copy(qBase).slerp(qTmp, w);
+      pushTrail(ship.position, w);
+    } else {
+      camera.position.copy(P);
+      camera.quaternion.copy(qBase);
+    }
+    const zoomIn = smoother(THREE.MathUtils.clamp((trans.t - 0.55) / 0.45, 0, 1));
+    fov = THREE.MathUtils.lerp(trans.fovFrom, targetFov, zoomIn) + Math.sin(s * Math.PI) * 3;
     look.copy(f.look);
     if (trans.t >= 1) trans = null;
   } else {
@@ -619,9 +813,32 @@ function updateCamera(dt) {
   viewOffset.x += (viewOffset.tx - viewOffset.x) * Math.min(1, dt * 3);
   viewOffset.y += (viewOffset.ty - viewOffset.y) * Math.min(1, dt * 3);
   camera.fov = fov;
+  camera.userData.baseFov = trans ? fov : targetFov;
+  // Oculaire : masque circulaire une fois dans la lunette
+  const inScope = current.telescope && (!trans || trans.t > 0.88);
+  document.getElementById('eyepiece').classList.toggle('on', !!inScope);
+  // Dans l'oculaire, le fond de ciel nébuleux grossi devient un aplat : on le masque
+  sky.visible = !inScope;
+  if (inScope) document.getElementById('eyepiece').style.setProperty('--ex', `${window.innerWidth / 2 - viewOffset.x}px`);
   const w = window.innerWidth, h = window.innerHeight;
   camera.setViewOffset(w, h, viewOffset.x, viewOffset.y, w, h);
   camera.updateProjectionMatrix();
+}
+
+// Traînée du réacteur
+function pushTrail(p, w) {
+  const pos = trail.geometry.attributes.position, col = trail.geometry.attributes.color;
+  const n = Math.min(TRAIL_N, (trail.userData.n || 0) + 1);
+  trail.userData.n = n;
+  for (let i = n - 1; i > 0; i--) pos.setXYZ(i, pos.getX(i - 1), pos.getY(i - 1), pos.getZ(i - 1));
+  pos.setXYZ(0, p.x, p.y, p.z);
+  for (let i = 0; i < TRAIL_N; i++) {
+    const k = i < n ? Math.pow(1 - i / TRAIL_N, 2) * w : 0;
+    col.setXYZ(i, 1.0 * k, 0.6 * k, 0.3 * k);
+  }
+  trail.geometry.setDrawRange(0, n);
+  pos.needsUpdate = col.needsUpdate = true;
+  trail.visible = n > 1;
 }
 
 function computeViewOffset() {
@@ -716,7 +933,7 @@ function updateLabels() {
   for (const b of BODIES) {
     const el = b.label;
     let show = false;
-    if (ready && current && !overlayOpen && b.obj) {
+    if (ready && current && !overlayOpen && b.obj && !current.telescope) {
       if (current.kind === 'star') show = b.kind !== 'moon';
       else show = b === g || b.parent === g || (b.kind !== 'moon' && b !== g);
     }
@@ -876,10 +1093,12 @@ function frame() {
   prominences.userData.update(simTime);
   film.uniforms.uTime.value = simTime;
   corona.material.rotation = simTime * 0.01;
-  if (!nova) corona.scale.setScalar(SUN_RADIUS * 5 * (1 + Math.sin(simTime * 0.7) * 0.02));
+  if (!nova) corona.scale.setScalar(SUN_RADIUS * 4.6 * (1 + Math.sin(simTime * 0.7) * 0.02 + coronaFlare * 0.25));
 
   if (ready) {
     placeBodies(dt);
+    updateTelescope(dt);
+    updateSpaceWeather(dt);
     if (current) updateCamera(dt);
     updateLabels();
     updateOrbits();
@@ -908,7 +1127,7 @@ function onModelLoaded(gltf) {
     buildSystem(gltf);
     ui.loader.classList.add('hidden');
     setTimeout(() => ui.loader.remove(), 1400);
-    [ui.nav, ui.timer, tree].forEach((el) => el.classList.add('visible'));
+    [ui.nav, ui.timer, tree, document.getElementById('space-weather')].forEach((el) => el.classList.add('visible'));
     const start = location.hash.slice(1);
     goTo(byId[start] ? start : 'lexa');
 }
@@ -916,6 +1135,7 @@ function onModelError(err) {
   console.error(err);
   ui.loaderPct.textContent = 'Impossible de charger le système.';
 }
+if (location.search.includes('debug')) window.__debug = { spawnCME, byId, goTo };
 const gltfLoader = new GLTFLoader();
 if (window.__PLANETARIUM_GLB__) {
   // Modèle embarqué en base64 (version aperçu hébergée sans fichier .glb)

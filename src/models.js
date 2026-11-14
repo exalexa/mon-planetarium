@@ -1,6 +1,7 @@
 // Modèles procéduraux low-poly : planètes, lunes, lieux d'études, sondes spatiales, projets.
 // Style volontairement « fait main », facetté, proche de l'esthétique d'Outer Wilds.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------------------
 // Outils
@@ -75,14 +76,26 @@ export function mansardRoof(p, w, h, d, m, x, y, z, inset = 0.28) {
   return add(p, g, m, x, y, z);
 }
 // Rangées de fenêtres éclairées sur une façade (face +Z ou -Z)
-export function windows(p, { w, rows, cols, y0, dy, z, h = 0.09, ww = 0.07, m }) {
-  const g = new THREE.BoxGeometry(ww, h, 0.02);
+// Rangées de fenêtres : vitre (éclairée ou sombre), appui et linteau en pierre claire.
+// Toutes les pièces sont fusionnées en deux maillages pour rester léger.
+export function windows(p, { w, rows, cols, y0, dy, z, h = 0.09, ww = 0.07, m, trim = 0xf3ecdc }) {
+  const panes = [], frames = [];
+  const side = z >= 0 ? 1 : -1;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const x = -w / 2 + (w / cols) * (c + 0.5);
-      add(p, g, m, x, y0 + r * dy, z);
+      const y = y0 + r * dy;
+      panes.push(new THREE.BoxGeometry(ww, h, 0.02).translate(x, y, z));
+      // Croisée (meneau et traverse) devant la vitre
+      frames.push(new THREE.BoxGeometry(0.008, h, 0.012).translate(x, y, z + side * 0.012));
+      frames.push(new THREE.BoxGeometry(ww, 0.008, 0.012).translate(x, y + h * 0.15, z + side * 0.012));
+      // Appui et linteau
+      frames.push(new THREE.BoxGeometry(ww + 0.03, 0.016, 0.04).translate(x, y - h / 2 - 0.008, z));
+      frames.push(new THREE.BoxGeometry(ww + 0.02, 0.014, 0.03).translate(x, y + h / 2 + 0.007, z));
     }
   }
+  if (panes.length) p.add(new THREE.Mesh(mergeGeometries(panes), m));
+  if (frames.length) p.add(new THREE.Mesh(mergeGeometries(frames), mat(trim)));
 }
 export function tree(p, x, y, z, s = 1, color = 0x3f6b3a) {
   cyl(p, 0.025 * s, 0.035 * s, 0.14 * s, 5, mat(0x5a3d26), x, y, z);
@@ -105,7 +118,7 @@ export function placeOnSphere(obj, radius, dir) {
 // Planètes et lunes
 // ---------------------------------------------------------------------------
 // Planète rocheuse facettée, couleurs selon l'altitude
-export function createPlanet({ radius, seed = 1, detail = 5, amp = 0.07, freq = 1.4, colors, trees = 0, treeColor, veins = null }) {
+export function createPlanet({ radius, seed = 1, detail = 5, amp = 0.07, freq = 1.4, colors, trees = 0, treeColor, veins = null, patch = null }) {
   const geometry = new THREE.IcosahedronGeometry(radius, detail);
   const pos = geometry.attributes.position;
   const v = new THREE.Vector3();
@@ -129,6 +142,12 @@ export function createPlanet({ radius, seed = 1, detail = 5, amp = 0.07, freq = 
       v.fromBufferAttribute(pos, i).normalize();
       const vn = Math.abs(fbm3(v.x * 4 + 7, v.y * 4, v.z * 4) - 0.5);
       if (vn < 0.025) c.set(veins);
+    }
+    if (patch) {
+      // Région claire (ex. Tombaugh Regio, le « cœur » de Pluton)
+      v.fromBufferAttribute(pos, i).normalize();
+      const d = v.distanceTo(patch.dir) + (fbm3(v.x * 5, v.y * 5, v.z * 5) - 0.5) * 0.15;
+      if (d < patch.size) c.set(patch.color);
     }
     for (let j = 0; j < 3; j++) cols.set([c.r, c.g, c.b], (i + j) * 3);
   }
@@ -461,5 +480,55 @@ export function createPlanetRing(inner, outer, { colors = ['#d8cfe8', '#b9aedb',
   const g = new THREE.Group();
   g.add(ring);
   if (dust) g.add(createRing(inner * 1.02, outer * 0.98, 0xe9e0ff, 1800));
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Vaisseau d'exploration (esprit « fait main » : coque ronde, bandeau de bois, hublot)
+// Avant du vaisseau vers +Z.
+// ---------------------------------------------------------------------------
+export function createShip() {
+  const g = new THREE.Group();
+  const hull = mat(0xe9e0cc), orange = mat(0xe07a3a), wood = mat(0x8a5a36), metal = mat(0x8f969c), dark = mat(0x2a2622);
+  const body = add(g, new THREE.SphereGeometry(0.62, 20, 14), hull, 0, 0, 0);
+  body.scale.set(1, 0.82, 1.2);
+  add(g, new THREE.TorusGeometry(0.66, 0.06, 8, 32), wood, 0, -0.02, 0, [Math.PI / 2, 0, 0]).scale.set(1, 1.2, 1);
+  add(g, new THREE.TorusGeometry(0.6, 0.035, 6, 32), orange, 0, 0.2, 0, [Math.PI / 2, 0, 0]).scale.set(1, 1.15, 1);
+  // Hublot avant éclairé
+  const win = add(g, new THREE.SphereGeometry(0.34, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2.4), new THREE.MeshStandardMaterial({ color: 0x1d2a33, emissive: 0xffc27a, emissiveIntensity: 0.9, roughness: 0.2 }), 0, 0.08, 0.6);
+  win.rotation.x = Math.PI / 2;
+  add(g, new THREE.TorusGeometry(0.33, 0.04, 8, 24), metal, 0, 0.08, 0.66);
+  // Pieds d'atterrissage
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + Math.PI / 3;
+    const leg = add(g, new THREE.CylinderGeometry(0.03, 0.035, 0.7, 6), metal, Math.sin(a) * 0.5, -0.55, Math.cos(a) * 0.55);
+    leg.rotation.set(Math.cos(a) * 0.45, 0, -Math.sin(a) * 0.45);
+    add(g, new THREE.CylinderGeometry(0.1, 0.12, 0.04, 10), dark, Math.sin(a) * 0.68, -0.88, Math.cos(a) * 0.73);
+  }
+  // Réacteur arrière et petits propulseurs
+  add(g, new THREE.CylinderGeometry(0.22, 0.3, 0.3, 14), metal, 0, 0, -0.78, [Math.PI / 2, 0, 0]);
+  for (const sx of [-1, 1]) add(g, new THREE.CylinderGeometry(0.07, 0.09, 0.2, 8), metal, sx * 0.55, 0.05, -0.55, [Math.PI / 2, 0, 0]);
+  // Antenne et feux de position
+  cyl(g, 0.012, 0.012, 0.45, 5, metal, 0.18, 0.45, -0.1);
+  add(g, new THREE.SphereGeometry(0.035, 6, 6), glow(0xff5a4a, 3), -0.62, 0, 0.1);
+  add(g, new THREE.SphereGeometry(0.035, 6, 6), glow(0x5aff8a, 3), 0.62, 0, 0.1);
+  add(g, new THREE.SphereGeometry(0.03, 6, 6), glow(0xfff0c0, 4), 0.18, 0.68, -0.1);
+  // Flamme du réacteur
+  const flameGeo = new THREE.ConeGeometry(0.2, 1.4, 14, 1, true);
+  flameGeo.translate(0, 0.7, 0);
+  flameGeo.rotateX(-Math.PI / 2); // base contre la tuyère, pointe vers l'arrière (−Z)
+  const flame = new THREE.Mesh(flameGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.2, 0.5), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false }));
+  flame.position.z = -0.92;
+  g.add(flame);
+  const core = new THREE.Mesh(flameGeo.clone(), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 2.0, 2.6), transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+  core.scale.set(0.45, 0.45, 0.6);
+  core.position.z = -0.92;
+  g.add(core);
+  g.userData.setThrust = (k, t) => {
+    const f = 0.25 + k * (0.85 + 0.15 * Math.sin(t * 40));
+    flame.scale.set(0.6 + k * 0.5, 0.6 + k * 0.5, f * 1.6);
+    core.scale.set(0.45, 0.45, f * 0.9);
+    flame.material.opacity = 0.3 + 0.5 * k;
+  };
   return g;
 }

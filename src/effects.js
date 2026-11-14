@@ -640,3 +640,136 @@ export function createMapDot(color) {
   sp.scale.setScalar(0.018);
   return sp;
 }
+
+// ---------------------------------------------------------------------------
+// Météo spatiale : aurores, magnétosphères, éjections de masse coronale
+// ---------------------------------------------------------------------------
+// Aurores : deux ovales de rideaux lumineux autour des pôles magnétiques (axe Y local)
+export function createAurora(R, { bottom = '#5dffa0', top = '#c45bff', colatitude = 0.34 } = {}) {
+  const uniforms = { uTime: { value: 0 }, uIntensity: { value: 0.2 }, uBottom: { value: new THREE.Color(bottom) }, uTop: { value: new THREE.Color(top) } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime, uIntensity; uniform vec3 uBottom, uTop;
+      varying vec2 vUv;
+      void main() {
+        float x = vUv.x * 6.2831;
+        float folds = 0.5 + 0.5 * sin(x * 9.0 + uTime * 0.7 + sin(x * 3.0 - uTime * 0.4) * 2.0);
+        float rays = 0.6 + 0.4 * sin(x * 70.0 + uTime * 2.3) * sin(x * 31.0 - uTime * 1.1);
+        float h = vUv.y;
+        float a = smoothstep(0.0, 0.08, h) * pow(1.0 - h, 1.4) * (0.35 + 0.65 * folds) * rays;
+        vec3 col = mix(uBottom, uTop, smoothstep(0.25, 0.95, h));
+        gl_FragColor = vec4(col * a * uIntensity * 1.6, 1.0);
+      }
+    `,
+  });
+  const g = new THREE.Group();
+  const r = R * Math.sin(colatitude), y = R * Math.cos(colatitude), h = R * 0.16;
+  for (const sgn of [1, -1]) {
+    const geo = new THREE.CylinderGeometry(r * 1.12, r, h, 128, 1, true);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.y = sgn * (y + h * 0.45);
+    if (sgn < 0) m.rotation.x = Math.PI;
+    m.renderOrder = 4;
+    g.add(m);
+  }
+  g.userData.uniforms = uniforms;
+  return g;
+}
+
+// Magnétosphère : lignes de champ d'un dipôle, comprimées côté soleil et étirées en queue côté nuit
+export function createMagnetosphere(R, color = '#9fd0ff') {
+  const pts = [];
+  for (const L of [2, 2.8, 3.8, 5]) {
+    for (let k = 0; k < 8; k++) {
+      const phi = (k / 8) * Math.PI * 2;
+      const th0 = Math.asin(Math.sqrt(1 / L));
+      const N = 48;
+      let prev = null;
+      for (let i = 0; i <= N; i++) {
+        const th = th0 + (i / N) * (Math.PI - 2 * th0);
+        const r = L * R * Math.sin(th) ** 2;
+        const p = new THREE.Vector3(r * Math.sin(th) * Math.cos(phi), r * Math.cos(th), r * Math.sin(th) * Math.sin(phi));
+        if (prev) pts.push(prev, p);
+        prev = p;
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const uniforms = { uSun: { value: new THREE.Vector3(1, 0, 0) }, uK: { value: 0.2 }, uOpacity: { value: 0 }, uColor: { value: new THREE.Color(color) }, uR: { value: R } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      uniform vec3 uSun; uniform float uK, uR;
+      varying float vF;
+      void main() {
+        vec3 p = position;
+        float s = dot(p, uSun);
+        float far = smoothstep(uR * 1.2, uR * 6.0, length(p));
+        // Côté jour : compression par la pression du vent solaire ; côté nuit : queue magnétique
+        if (s > 0.0) p -= uSun * s * uK * 0.45 * far;
+        else p += uSun * s * uK * 1.6 * far;
+        vF = far;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity; uniform vec3 uColor;
+      varying float vF;
+      void main() { gl_FragColor = vec4(uColor * uOpacity * (0.35 + 0.65 * vF), 1.0); }
+    `,
+  });
+  const lines = new THREE.LineSegments(geo, mat);
+  lines.frustumCulled = false;
+  lines.userData.uniforms = uniforms;
+  return lines;
+}
+
+// Éjection de masse coronale : coquille de plasma qui s'éloigne du soleil dans un cône
+export function createCME(count = 2600, width = 0.45) {
+  let s = 99;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const aDir = new Float32Array(count * 3), aOff = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    // Direction dans un cône autour de +X, plus dense au centre
+    const a = Math.pow(rnd(), 0.7) * width, b = rnd() * Math.PI * 2;
+    aDir.set([Math.cos(a), Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b)], i * 3);
+    aOff[i] = 0.82 + rnd() * 0.22 + (rnd() < 0.15 ? -rnd() * 0.3 : 0);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
+  geo.setAttribute('aOff', new THREE.BufferAttribute(aOff, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uR: { value: 0 }, uFade: { value: 0 }, uPixelRatio: { value: 1 } },
+    vertexShader: /* glsl */ `
+      attribute vec3 aDir; attribute float aOff;
+      uniform float uR, uPixelRatio;
+      varying float vA;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(aDir * uR * aOff, 1.0);
+        gl_Position = projectionMatrix * mv;
+        vA = aOff;
+        gl_PointSize = clamp(420.0 / -mv.z, 1.0, 4.0) * uPixelRatio;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uFade; varying float vA;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float m = smoothstep(0.5, 0.0, d);
+        vec3 col = mix(vec3(1.0, 0.55, 0.25), vec3(1.0, 0.9, 0.7), vA - 0.6);
+        gl_FragColor = vec4(col * m * uFade * 0.9, 1.0);
+      }
+    `,
+  });
+  const p = new THREE.Points(geo, mat);
+  p.frustumCulled = false;
+  p.visible = false;
+  return p;
+}
