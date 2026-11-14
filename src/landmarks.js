@@ -473,6 +473,7 @@ export function amuMarseille(R) {
   );
   sea.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0.8, -0.35, 0.5).normalize());
   sea.userData.noDrape = true;
+  sea.userData.water = true;
   g.add(sea);
   return g;
 }

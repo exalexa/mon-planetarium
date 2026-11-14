@@ -682,16 +682,15 @@ export function createAurora(R, { bottom = '#5dffa0', top = '#ff5a7a', fringe = 
     void main() {
       float x = vUv.x * 6.2831;
       float h = vUv.y;
-      // Rayons verticaux qui glissent le long du rideau
-      float rays = noise1(x * 60.0 + uTime * 1.4 + vLayer * 13.0) * 0.6 + noise1(x * 140.0 - uTime * 2.2) * 0.4;
-      rays = pow(rays, 1.5);
+      // Variations douces le long du rideau (draperies de gaz, sans traits)
+      float rays = 0.55 + 0.45 * noise1(x * 7.0 + uTime * 0.25 + vLayer * 13.0);
       // Bord inférieur net et lumineux, décroissance vers le haut
-      float base = smoothstep(0.0, 0.035, h) * (0.55 + 0.45 * smoothstep(0.12, 0.0, h - 0.03));
+      float base = smoothstep(0.0, 0.12, h);
       float decay = exp(-h * 2.6);
       float breathe = 0.75 + 0.25 * sin(uTime * 0.9 + x * 2.0 + vLayer * 4.0);
       vec3 col = mix(uBottom, uTop, smoothstep(0.35, 0.9, h));
       col = mix(uFringe, col, smoothstep(0.0, 0.06, h));
-      float a = base * decay * (0.25 + 0.75 * rays) * breathe * (0.35 + 0.65 * vNight) * uIntensity;
+      float a = base * decay * rays * breathe * (0.35 + 0.65 * vNight) * uIntensity;
       gl_FragColor = vec4(col * a * 1.8, 1.0);
     }
   `;
@@ -770,71 +769,102 @@ export function createMagnetosphere(R, color = '#9fd0ff') {
   return lines;
 }
 
-// Éjection de masse coronale : un faisceau de lignes de flux torsadées (corde de flux magnétique)
-// qui se déploie depuis le soleil dans un cône, avec un front lumineux. Orienté selon +X.
-export function createCME({ sunRadius = 50, maxRadius = 1150, lines = 140, width = 0.42 } = {}) {
+// Éjection de masse coronale : un nuage de plasma qui s'élargit dans un cône, rendu comme du gaz
+// (grosses bouffées douces, sans traits). Orienté selon +X.
+function softTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+export function createCME({ sunRadius = 50, maxRadius = 1150, count = 420, width = 0.42 } = {}) {
   let sd = 99;
   const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
-  const pos = [], sAttr = [], ph = [];
-  const SEG = 80;
-  for (let k = 0; k < lines; k++) {
-    const a0 = Math.sqrt(rnd()) * width, b0 = rnd() * Math.PI * 2;
-    const twist = (rnd() - 0.5) * 0.6;
-    const p0 = rnd();
-    let prev = null;
-    for (let i = 0; i <= SEG; i++) {
-      const s = i / SEG;
-      const r = sunRadius + s * (maxRadius - sunRadius);
-      // Les lignes s'enroulent autour de l'axe du nuage (torsion de la corde de flux)
-      const b = b0 + twist * s * 6.0;
-      const a = a0 * (0.6 + 0.4 * Math.sqrt(s));
-      const p = [Math.cos(a) * r, Math.sin(a) * Math.cos(b) * r, Math.sin(a) * Math.sin(b) * r];
-      if (prev) { pos.push(...prev.p, ...p); sAttr.push(prev.s, s); ph.push(p0, p0); }
-      prev = { p, s };
-    }
+  const aDir = new Float32Array(count * 3), aLag = new Float32Array(count), aSize = new Float32Array(count), aSeed = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const a = Math.sqrt(rnd()) * width, b = rnd() * Math.PI * 2;
+    aDir.set([Math.cos(a), Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b)], i * 3);
+    // La plupart des bouffées forment le front ; le reste traîne derrière en panache
+    aLag[i] = rnd() < 0.55 ? rnd() * 0.08 : 0.08 + Math.pow(rnd(), 1.6) * 0.55;
+    aSize[i] = 0.6 + rnd() * 0.9;
+    aSeed[i] = rnd() * 100;
   }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('aS', new THREE.Float32BufferAttribute(sAttr, 1));
-  geo.setAttribute('aPhase', new THREE.Float32BufferAttribute(ph, 1));
-  const uniforms = { uFront: { value: 0 }, uFade: { value: 0 }, uTime: { value: 0 }, uPixelRatio: { value: 1 } };
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
+  geo.setAttribute('aLag', new THREE.BufferAttribute(aLag, 1));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 1));
+  const uniforms = { uR: { value: sunRadius }, uFade: { value: 0 }, uTime: { value: 0 }, uMap: { value: softTexture() }, uScale: { value: 400 }, uSun: { value: sunRadius } };
   const mat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */ `
-      attribute float aS, aPhase; varying float vS, vPhase, vDepth;
-      void main() { vS = aS; vPhase = aPhase; vec4 mv = modelViewMatrix * vec4(position, 1.0); vDepth = -mv.z; gl_Position = projectionMatrix * mv; }
+      attribute vec3 aDir; attribute float aLag, aSize, aSeed;
+      uniform float uR, uTime, uScale, uSun;
+      varying float vA; varying float vHot;
+      void main() {
+        float r = max(uSun, uR * (1.0 - aLag));
+        vec3 p = aDir * r;
+        // Turbulence lente du gaz
+        p += vec3(sin(uTime * 0.3 + aSeed), cos(uTime * 0.25 + aSeed * 1.3), sin(uTime * 0.2 + aSeed * 0.7)) * r * 0.025;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        float size = aSize * (6.0 + r * 0.05);
+        gl_PointSize = clamp(size * uScale / -mv.z, 2.0, 140.0);
+        vHot = 1.0 - smoothstep(0.0, 0.3, aLag);
+        vA = (1.0 - aLag) * smoothstep(uSun, uSun + 25.0, r) * smoothstep(40.0, 260.0, -mv.z);
+      }
     `,
     fragmentShader: /* glsl */ `
-      uniform float uFront, uFade, uTime; varying float vS, vPhase, vDepth;
+      uniform sampler2D uMap; uniform float uFade; varying float vA; varying float vHot;
       void main() {
-        if (vS > uFront) discard;
-        float behind = uFront - vS;
-        float front = exp(-behind * 28.0);
-        float flow = fract(vS * 14.0 - uTime * 0.9 + vPhase * 5.0);
-        float pulse = smoothstep(0.0, 0.2, flow) * (1.0 - smoothstep(0.2, 1.0, flow));
-        float body = (0.18 + 0.5 * pulse) * exp(-behind * 3.5);
-        vec3 col = mix(vec3(1.0, 0.5, 0.22), vec3(1.0, 0.92, 0.75), front);
-        float near = smoothstep(15.0, 120.0, vDepth);
-        gl_FragColor = vec4(col * (body * 0.32 + front * 0.9) * uFade * near * smoothstep(0.0, 0.06, vS), 1.0);
+        float m = texture2D(uMap, gl_PointCoord).r;
+        vec3 col = mix(vec3(1.0, 0.45, 0.2), vec3(1.0, 0.85, 0.65), vHot);
+        gl_FragColor = vec4(col * m * vA * uFade * 0.05, 1.0);
       }
     `,
   });
+  const pts = new THREE.Points(geo, mat);
+  pts.frustumCulled = false;
   const group = new THREE.Group();
-  const l = new THREE.LineSegments(geo, mat);
-  l.frustumCulled = false;
-  group.add(l);
-  // Front de choc : calotte lumineuse au bout du nuage
-  const capMat = new THREE.ShaderMaterial({
-    uniforms: { uFade: uniforms.uFade },
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: /* glsl */ `varying vec3 vN; varying vec3 vV; void main(){ vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position,1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: /* glsl */ `uniform float uFade; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.0); gl_FragColor = vec4(vec3(1.0, 0.7, 0.4) * f * 0.3 * uFade, 1.0); }`,
-  });
-  const capGeo = new THREE.SphereGeometry(1, 32, 10, 0, Math.PI * 2, 0, width * 1.05);
-  capGeo.rotateZ(-Math.PI / 2); // calotte autour de +X
-  const cap = new THREE.Mesh(capGeo, capMat);
-  group.add(cap);
+  group.add(pts);
   group.visible = false;
-  group.userData = { uniforms, cap, sunRadius, maxRadius };
+  group.userData = { uniforms };
   return group;
+}
+
+// Onde de choc / magnétopause : une bulle de gaz lumineuse côté soleil, visible pendant l'impact
+export function createBowShock(R, color = '#9fd0ff') {
+  const uniforms = { uOpacity: { value: 0 }, uColor: { value: new THREE.Color(color) }, uSun: { value: new THREE.Vector3(1, 0, 0) } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      uniform vec3 uSun;
+      varying vec3 vN; varying vec3 vV; varying float vFront;
+      void main() {
+        vec3 p = position;
+        float s = dot(normalize(p), uSun);
+        // Aplatie côté soleil, étirée côté nuit
+        p *= s > 0.0 ? 1.0 - 0.35 * s : 1.0 - 0.6 * s;
+        vFront = s;
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity; uniform vec3 uColor; varying vec3 vN; varying vec3 vV; varying float vFront;
+      void main() {
+        float rim = pow(1.0 - abs(dot(vN, vV)), 2.5);
+        float side = smoothstep(-0.3, 0.8, vFront);
+        gl_FragColor = vec4(uColor * rim * side * uOpacity * 0.5, 1.0);
+      }
+    `,
+  });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(R * 3.2, 48, 32), mat);
+  m.userData.uniforms = uniforms;
+  m.renderOrder = 3;
+  return m;
 }

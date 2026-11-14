@@ -87,7 +87,7 @@ export const SYSTEM = [
       p.add(M.createPlanetRing(31, 52));
       return p;
     },
-    radius: 24, mu: 0.008, tilt: 26.73 * deg, spin: 0.14,
+    radius: 24, mu: 0.008, tilt: 26.73 * deg, spin: 0.14, gas: true,
     magnetic: { tilt: 10 * deg, bottom: '#8f7bff', top: '#ff7ad9' },
     orbit: { a: 603, e: 0.0489, i: 1.3, node: 1.753, peri: 4.78, M0: 3.6 },
     atmosphere: { color: '#a98cff', shell: 1.08, radius: 24.2 },
@@ -108,7 +108,7 @@ export const SYSTEM = [
       p.add(M.createPlanetRing(20, 26, { colors: ['#9a8f99', '#b8adb6'], opacity: 0.5, dust: false }));
       return p;
     },
-    radius: 16, mu: 0.006, tilt: 97.77 * deg, spin: -0.1,
+    radius: 16, mu: 0.006, tilt: 97.77 * deg, spin: -0.1, gas: true,
     magnetic: { tilt: 59 * deg, bottom: '#7fd8ff', top: '#b58cff' },
     orbit: { a: 920, e: 0.0565, i: 2.49, node: 1.984, peri: 5.924, M0: 1.2 },
     atmosphere: { color: '#ffb0cf', shell: 1.1, radius: 16.2 },

@@ -2,7 +2,8 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/mon-planetarium/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Portfolio d'Axel Mannu Corrieras : physique, ingénierie et arts, à explorer comme un petit système solaire." />
     <meta name="theme-color" content="#05060c" />
@@ -35,37 +36,33 @@
       <button type="button" data-mode="free" title="Pilotez vous-même, vue à la troisième personne (touche M)">Vol libre</button>
     </div>
 
-    <!-- Cockpit (mode pilote automatique) -->
+    <!-- Cockpit (mode pilote automatique) : verrière en haut, console en bas avec ses écrans -->
     <div id="cockpit" aria-hidden="true">
-      <svg class="cockpit-frame" viewBox="0 0 1600 900" preserveAspectRatio="none">
+      <svg class="cockpit-frame" viewBox="0 0 1600 620" preserveAspectRatio="none">
         <defs>
           <linearGradient id="ck-metal" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#3a2f27" /><stop offset="0.5" stop-color="#241c17" /><stop offset="1" stop-color="#16110d" />
-          </linearGradient>
-          <linearGradient id="ck-wood" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#6e4628" /><stop offset="1" stop-color="#3f2716" />
+            <stop offset="0" stop-color="#3a2f27" /><stop offset="0.6" stop-color="#241c17" /><stop offset="1" stop-color="#1a130e" />
           </linearGradient>
         </defs>
-        <!-- Encadrement : tout l'écran moins la verrière arrondie -->
-        <path fill="url(#ck-metal)" fill-rule="evenodd" d="M0 0H1600V900H0Z M150 70 C 520 18, 1080 18, 1450 70 C 1530 260, 1530 520, 1470 700 C 1060 742, 540 742, 130 700 C 70 520, 70 260, 150 70 Z" />
-        <!-- Montants de la verrière -->
-        <path d="M150 70 C 360 260, 400 520, 330 712" stroke="#2b221b" stroke-width="16" fill="none" />
-        <path d="M1450 70 C 1240 260, 1200 520, 1270 712" stroke="#2b221b" stroke-width="16" fill="none" />
-        <path d="M150 70 C 520 18, 1080 18, 1450 70 C 1530 260, 1530 520, 1470 700 C 1060 742, 540 742, 130 700 C 70 520, 70 260, 150 70 Z" stroke="#c98a4a" stroke-opacity="0.35" stroke-width="3" fill="none" />
-        <!-- Rivets -->
+        <path fill="url(#ck-metal)" fill-rule="evenodd" d="M0 0H1600V620H0Z M140 64 C 520 14, 1080 14, 1460 64 C 1540 220, 1545 430, 1490 596 C 1060 610, 540 610, 110 596 C 55 430, 60 220, 140 64 Z" />
+        <path d="M140 64 C 340 220, 380 440, 330 604" stroke="#2b221b" stroke-width="14" fill="none" />
+        <path d="M1460 64 C 1260 220, 1220 440, 1270 604" stroke="#2b221b" stroke-width="14" fill="none" />
+        <path d="M140 64 C 520 14, 1080 14, 1460 64 C 1540 220, 1545 430, 1490 596 C 1060 610, 540 610, 110 596 C 55 430, 60 220, 140 64 Z" stroke="#c98a4a" stroke-opacity="0.35" stroke-width="3" fill="none" />
         <g fill="#8a6a4a" opacity="0.7">
-          <circle cx="300" cy="44" r="5" /><circle cx="560" cy="30" r="5" /><circle cx="800" cy="26" r="5" /><circle cx="1040" cy="30" r="5" /><circle cx="1300" cy="44" r="5" />
-          <circle cx="96" cy="300" r="5" /><circle cx="90" cy="500" r="5" /><circle cx="1504" cy="300" r="5" /><circle cx="1510" cy="500" r="5" />
+          <circle cx="300" cy="40" r="5" /><circle cx="560" cy="27" r="5" /><circle cx="800" cy="23" r="5" /><circle cx="1040" cy="27" r="5" /><circle cx="1300" cy="40" r="5" />
+          <circle cx="86" cy="260" r="5" /><circle cx="82" cy="430" r="5" /><circle cx="1514" cy="260" r="5" /><circle cx="1518" cy="430" r="5" />
         </g>
-        <!-- Tableau de bord en bois -->
-        <path fill="url(#ck-wood)" d="M0 900 V760 C 420 722, 1180 722, 1600 760 V900 Z" />
-        <path d="M0 760 C 420 722, 1180 722, 1600 760" stroke="#c98a4a" stroke-opacity="0.5" stroke-width="4" fill="none" />
       </svg>
+      <div class="console">
+        <div class="console-trim"></div>
+        <div class="console-slot left"><span>Fiche</span></div>
+        <div class="console-slot right"><span>Journal de bord</span></div>
+      </div>
       <div class="dash">
         <div class="dash-gauge"><div class="gauge-needle" id="dash-needle"></div><span>Poussée</span></div>
         <div class="dash-screen">
           <div class="dash-row"><span>Cible</span><b id="dash-target">LEXA</b></div>
-          <div class="dash-row"><span>Statut</span><b id="dash-status">En orbite</b></div>
+          <div class="dash-row"><span>Phase</span><b id="dash-status">En orbite</b></div>
           <div class="dash-row"><span>Distance</span><b id="dash-dist">–</b></div>
           <div class="dash-row"><span>Vitesse</span><b id="dash-speed">–</b></div>
           <div class="dash-row"><span>Héliocentre</span><b id="dash-helio">–</b></div>
@@ -79,11 +76,14 @@
       <div id="target-marker"><span class="tm-ring"></span><span class="tm-label" id="tm-label"></span></div>
       <div id="near-label"></div>
       <div id="free-speed"></div>
+      <div id="free-hint"></div>
       <div id="free-help">
         <b>Vol libre</b>
-        <span><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> ou <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ou flèches : se déplacer</span>
-        <span><kbd>Espace</kbd> monter · <kbd>C</kbd> descendre · <kbd>Maj</kbd> propulsion rapide</span>
-        <span>Glisser : regarder · molette : recul de la caméra</span>
+        <span><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> : avancer, reculer, aller à gauche / à droite</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> tangage · <kbd>←</kbd><kbd>→</kbd> lacet</span>
+        <span><kbd>Ctrl</kbd> + <kbd>←</kbd><kbd>→</kbd> roulis · <kbd>Ctrl</kbd> + <kbd>↑</kbd><kbd>↓</kbd> monter / descendre</span>
+        <span><kbd>Maj</kbd> propulsion rapide · <kbd>E</kbd> sortir le véhicule une fois posé</span>
+        <span>Glisser : regarder autour · molette : recul de la caméra</span>
         <span>Cliquer un astre ou le journal : le désigner comme cible</span>
       </div>
       <div id="flight-pad">
@@ -93,7 +93,8 @@
         <button type="button" data-key="left" aria-label="Gauche">◀</button>
         <button type="button" data-key="back" aria-label="Reculer">▼</button>
         <button type="button" data-key="right" aria-label="Droite">▶</button>
-        <button type="button" data-key="boost" class="wide" aria-label="Propulsion rapide">Propulsion</button>
+        <button type="button" data-key="boost" aria-label="Propulsion rapide">⇧</button>
+        <button type="button" data-key="action" class="wide" aria-label="Véhicule">Véhicule (E)</button>
       </div>
     </div>
 
