@@ -32,13 +32,23 @@
 
     <!-- Choix du mode de pilotage -->
     <div id="mode-switch" role="group" aria-label="Mode de pilotage">
-      <button type="button" data-mode="auto" class="active" title="Le vaisseau vous emmène ; vue depuis le cockpit (touche M)">Pilote auto</button>
-      <button type="button" data-mode="free" title="Pilotez vous-même, vue à la troisième personne (touche M)">Vol libre</button>
+      <button type="button" data-mode="auto" class="active" title="Le vaisseau vous emmène (touche M)">Pilote auto</button>
+      <button type="button" data-mode="free" title="Pilotez vous-même (touche M)">Vol libre</button>
+      <button type="button" id="view-toggle" class="view-toggle" title="Vue depuis le cockpit ou de l'extérieur (touche V)">Vue cockpit</button>
     </div>
 
     <!-- Cockpit (mode pilote automatique) : le poste de pilotage est rendu en 3D ;
          le texte orangé est projeté sur la verrière -->
+    <!-- Filtre VHS : les rangées de texte se décalent horizontalement -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <filter id="vhs" x="-5%" y="0" width="110%" height="100%" color-interpolation-filters="sRGB">
+        <feTurbulence id="vhs-turb" type="fractalNoise" baseFrequency="0 0.06" numOctaves="1" seed="3" result="n" />
+        <feColorMatrix in="n" type="matrix" values="1 0 0 0 0  0 0 0 0 0.5  0 0 0 0 0  0 0 0 0 1" result="nx" />
+        <feDisplacementMap id="vhs-disp" in="SourceGraphic" in2="nx" scale="2.2" xChannelSelector="R" yChannelSelector="G" />
+      </filter>
+    </svg>
     <div id="glass-hud" aria-hidden="true">
+      <div class="vhs-band"></div>
       <div class="glass-sheen"></div>
       <svg class="glass-arcs" viewBox="0 0 1600 620" preserveAspectRatio="xMidYMin meet">
         <defs>

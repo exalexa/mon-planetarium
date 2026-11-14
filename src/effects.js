@@ -779,57 +779,78 @@ function softTexture() {
   x.fillStyle = g; x.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 }
-export function createCME({ sunRadius = 50, maxRadius = 1150, count = 420, width = 0.42 } = {}) {
-  let sd = 99;
-  const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
-  const aDir = new Float32Array(count * 3), aLag = new Float32Array(count), aSize = new Float32Array(count), aSeed = new Float32Array(count);
-  for (let i = 0; i < count; i++) {
-    const a = Math.sqrt(rnd()) * width, b = rnd() * Math.PI * 2;
-    aDir.set([Math.cos(a), Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b)], i * 3);
-    // La plupart des bouffées forment le front ; le reste traîne derrière en panache
-    aLag[i] = rnd() < 0.55 ? rnd() * 0.08 : 0.08 + Math.pow(rnd(), 1.6) * 0.55;
-    aSize[i] = 0.6 + rnd() * 0.9;
-    aSeed[i] = rnd() * 100;
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-  geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
-  geo.setAttribute('aLag', new THREE.BufferAttribute(aLag, 1));
-  geo.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1));
-  geo.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 1));
-  const uniforms = { uR: { value: sunRadius }, uFade: { value: 0 }, uTime: { value: 0 }, uMap: { value: softTexture() }, uScale: { value: 400 }, uSun: { value: sunRadius } };
-  const mat = new THREE.ShaderMaterial({
-    uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-      attribute vec3 aDir; attribute float aLag, aSize, aSeed;
-      uniform float uR, uTime, uScale, uSun;
-      varying float vA; varying float vHot;
-      void main() {
-        float r = max(uSun, uR * (1.0 - aLag));
-        vec3 p = aDir * r;
-        // Turbulence lente du gaz
-        p += vec3(sin(uTime * 0.3 + aSeed), cos(uTime * 0.25 + aSeed * 1.3), sin(uTime * 0.2 + aSeed * 0.7)) * r * 0.025;
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_Position = projectionMatrix * mv;
-        float size = aSize * (6.0 + r * 0.05);
-        gl_PointSize = clamp(size * uScale / -mv.z, 2.0, 140.0);
-        vHot = 1.0 - smoothstep(0.0, 0.3, aLag);
-        vA = (1.0 - aLag) * smoothstep(uSun, uSun + 25.0, r) * smoothstep(40.0, 260.0, -mv.z);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform sampler2D uMap; uniform float uFade; varying float vA; varying float vHot;
-      void main() {
-        float m = texture2D(uMap, gl_PointCoord).r;
-        vec3 col = mix(vec3(1.0, 0.45, 0.2), vec3(1.0, 0.85, 0.65), vHot);
-        gl_FragColor = vec4(col * m * vA * uFade * 0.05, 1.0);
-      }
-    `,
-  });
-  const pts = new THREE.Points(geo, mat);
-  pts.frustumCulled = false;
+export function createCME({ sunRadius = 50, width = 0.42, layers = 10 } = {}) {
+  // Éjection de masse coronale : bulle de plasma lumineux qui s'éloigne du soleil.
+  // Plusieurs coquilles emboîtées (le front et le panache qui suit), parcourues de filaments
+  // brillants qui ondulent comme un fluide (bruit déformé en domaine, crêtes lumineuses).
+  const uniforms = { uR: { value: sunRadius }, uFade: { value: 0 }, uTime: { value: 0 }, uScale: { value: 400 }, uSun: { value: sunRadius }, uWidth: { value: width } };
+  // Calotte de sphère autour de l'axe +X
+  const geo = new THREE.SphereGeometry(1, 72, 40, 0, Math.PI * 2, 0, width * 1.25);
+  geo.rotateZ(-Math.PI / 2);
   const group = new THREE.Group();
-  group.add(pts);
+  for (let i = 0; i < layers; i++) {
+    const lag = i / (layers - 1);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { ...uniforms, uLag: { value: lag * 0.5 }, uLayer: { value: i } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      vertexShader: /* glsl */ `
+        uniform float uR, uSun, uLag, uTime;
+        varying vec3 vDir; varying vec3 vN; varying vec3 vV; varying float vDepth; varying float vRad;
+        void main() {
+          vDir = normalize(position);
+          float r = max(uSun * 1.02, uR * (1.0 - uLag));
+          // Le front se gonfle un peu au centre, comme une bulle poussée par le champ magnétique
+          float bulge = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.5, acos(clamp(vDir.x, -1.0, 1.0))));
+          vec3 p = vDir * r * bulge;
+          vRad = r;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          vN = normalize(normalMatrix * vDir);
+          vV = normalize(-mv.xyz);
+          vDepth = -mv.z;
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uFade, uTime, uLag, uWidth, uLayer, uSun;
+        varying vec3 vDir; varying vec3 vN; varying vec3 vV; varying float vDepth; varying float vRad;
+        float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float noise(vec3 x) {
+          vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+        }
+        float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++) { s += a * noise(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
+        void main() {
+          float ang = acos(clamp(vDir.x, -1.0, 1.0));
+          float edge = 1.0 - smoothstep(uWidth * 0.55, uWidth * 1.2, ang);
+          // Coordonnées sur la calotte, qui s'écoulent vers l'extérieur avec le temps
+          vec3 q = vec3(vDir.yz * 3.4, uLayer * 0.9 + uTime * 0.08);
+          vec3 w = vec3(fbm(q + vec3(0.0, 0.0, uTime * 0.15)), fbm(q + vec3(5.2, 1.3, -uTime * 0.12)), 0.0);
+          vec3 w2 = vec3(fbm(q * 1.7 + 3.0 * w + vec3(1.3, 0.0, uTime * 0.1)), fbm(q * 1.7 + 3.0 * w + vec3(0.0, 4.1, 0.0)), 0.0);
+          float n = fbm(q + 3.0 * w2 + vec3(ang * 3.0 - uTime * 0.25, 0.0, 0.0));
+          // Crêtes : filaments de plasma fins et brillants, séparés par du vide
+          float ridge = 1.0 - abs(2.0 * n - 1.0);
+          float fil = pow(ridge, 6.0);
+          float glow = pow(ridge, 2.0) * 0.16 + 0.05;
+          // Boucle brillante sur le pourtour de la bulle (structure en « corde de flux »)
+          float loop = exp(-pow((ang - uWidth * 0.8) / (uWidth * 0.14), 2.0));
+          // Coquille vue de face : visible ; vue par la tranche : estompée (pas de liseré dur)
+          float facing = smoothstep(0.1, 0.75, abs(dot(normalize(vN), normalize(vV))));
+          float front = 1.0 - uLag * 1.5;
+          float a = (fil * (0.7 + loop * 1.4) + glow) * edge * front * facing;
+          // Proche de la caméra ou encore collé au soleil : on atténue
+          a *= smoothstep(15.0, 160.0, vDepth) * smoothstep(uSun * 1.02, uSun * 1.25, vRad);
+          vec3 hot = vec3(1.0, 0.74, 0.4), warm = vec3(1.0, 0.38, 0.1), cool = vec3(0.85, 0.16, 0.32);
+          vec3 col = mix(mix(cool, warm, smoothstep(0.2, 0.7, ridge)), hot, smoothstep(0.35, 0.9, fil));
+          gl_FragColor = vec4(col * a * uFade * 0.5, 1.0);
+        }
+      `,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.frustumCulled = false;
+    m.renderOrder = 4;
+    group.add(m);
+  }
   group.visible = false;
   group.userData = { uniforms };
   return group;

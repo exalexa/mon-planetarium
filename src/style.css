@@ -658,6 +658,8 @@ kbd {
   cursor: pointer;
 }
 #mode-switch button.active { color: #24170c; background: var(--amber); }
+#mode-switch .view-toggle { margin-left: 4px; border-left: 1px solid var(--edge); border-radius: 0 999px 999px 0; color: var(--muted); }
+#mode-switch .view-toggle.fpv { color: var(--amber); }
 
 /* ---------- Cockpit ---------- */
 /* Le poste de pilotage est rendu en 3D ; ici, le texte orangé projeté sur la verrière */
@@ -670,7 +672,10 @@ kbd {
     radial-gradient(ellipse at 50% 125%, rgba(255, 150, 70, 0.14), transparent 45%),
     repeating-linear-gradient(180deg, transparent 0 2px, rgba(0, 0, 0, 0.12) 2px 3px);
 }
-.glass-arcs { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+.glass-arcs { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; filter: url(#vhs); }
+/* Bande de « tracking » VHS qui glisse lentement sur la verrière */
+.vhs-band { position: absolute; left: 0; right: 0; height: 34px; top: -40px; background: linear-gradient(180deg, transparent, rgba(255, 190, 130, 0.05) 40%, rgba(255, 190, 130, 0.08) 55%, transparent); animation: vhs-band 9s linear infinite; }
+@keyframes vhs-band { from { top: -40px; } to { top: 100%; } }
 .glass-arcs text { font-family: 'VT323', monospace; fill: var(--hud); filter: drop-shadow(0 0 5px rgba(255, 130, 40, 0.8)); }
 #reticle { position: fixed; display: none; border: 2px solid var(--hud); border-radius: 50%; box-shadow: 0 0 10px rgba(255, 140, 40, 0.6), inset 0 0 10px rgba(255, 140, 40, 0.25); opacity: 0.85; }
 #reticle.on { display: block; }
@@ -682,14 +687,19 @@ kbd {
 /* Lettres « analogiques » : grisaillement, sauts, effacements */
 .gw { white-space: nowrap; }
 .gc { transition: opacity 0.12s; }
-body.cockpit .g-ghost { opacity: 0.28; }
-body.cockpit .g-drop { opacity: 0.06; }
+body.cockpit .g-ghost { opacity: 0.45; }
+body.cockpit .g-dim { opacity: 0.55; }
+body.cockpit .g-drop { opacity: 0.15; }
 body.cockpit .g-jit { position: relative; top: -2px; left: 1px; }
 
 @media (min-width: 761px) {
   body.cockpit #glass-hud { display: block; }
   body.cockpit #hud-nav, body.cockpit #loop-timer, body.cockpit #space-weather { display: none; }
   body.cockpit #planetarium-title { top: 64px; font-size: clamp(2rem, 4vw, 3.4rem); }
+  body.cockpit.free #free-help { display: none; }
+  body.cockpit.free #free-speed { bottom: calc(100vh - var(--glass-bottom) + 12px); }
+  body.cockpit.free #near-label { top: calc(var(--glass-bottom) - 118px); }
+  body.cockpit.free #free-hint { top: calc(var(--glass-bottom) - 84px); }
   body.cockpit #mode-switch { background: rgba(20, 11, 5, 0.6); border-color: rgba(255, 154, 60, 0.35); }
 
   /* Fiche (à gauche) et journal (à droite) projetés sur le verre, en perspective */
@@ -697,8 +707,8 @@ body.cockpit .g-jit { position: relative; top: -2px; left: 1px; }
   body.cockpit #explore-tree .tree-inner {
     font-family: 'VT323', monospace;
     color: var(--hud);
-    text-shadow: 0 0 6px rgba(255, 140, 40, 0.75), 0 0 16px rgba(255, 110, 20, 0.35), -1px 0 rgba(255, 60, 20, 0.4), 1px 0 rgba(255, 220, 140, 0.25);
-    background: radial-gradient(closest-side, rgba(14, 7, 2, 0.6), rgba(14, 7, 2, 0.4) 65%, rgba(14, 7, 2, 0) 100%);
+    text-shadow: 0 0 4px rgba(255, 150, 50, 0.9), 0 0 14px rgba(255, 110, 20, 0.4), -1.5px 0 rgba(255, 60, 20, 0.45), 1.5px 0 rgba(255, 220, 140, 0.3);
+    background: radial-gradient(closest-side, rgba(12, 6, 2, 0.72), rgba(12, 6, 2, 0.5) 65%, rgba(12, 6, 2, 0) 100%);
     border: 0;
     border-radius: 18px;
     box-shadow: none;
@@ -710,14 +720,20 @@ body.cockpit .g-jit { position: relative; top: -2px; left: 1px; }
     left: 2.5vw;
     top: 8vh;
     width: min(30vw, 460px);
-    max-height: calc(var(--glass-bottom) - 14vh);
+    max-height: calc(var(--glass-bottom) - 19vh);
     padding: 16px 22px;
     opacity: 0;
     transform: perspective(1100px) rotateY(22deg);
     transform-origin: left center;
   }
   body.cockpit #astro-info-container.visible { opacity: 1; transform: perspective(1100px) rotateY(22deg); }
-  body.cockpit .panel-body { font-size: 1.22rem; line-height: 1.22; letter-spacing: 0.02em; color: var(--hud); }
+  body.cockpit .panel-body { font-size: 1.26rem; line-height: 1.24; letter-spacing: 0.02em; color: #ffad5c; }
+  /* Rangées de balayage qui traversent les lettres, comme une image VHS */
+  body.cockpit .panel-body, body.cockpit #explore-tree .tree-inner > * {
+    filter: url(#vhs);
+    -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 2px, rgba(0, 0, 0, 0.62) 2px 3px);
+    mask-image: repeating-linear-gradient(180deg, #000 0 2px, rgba(0, 0, 0, 0.62) 2px 3px);
+  }
   body.cockpit .panel-body :is(h2, h3, b, i, p, li, span, .log-kicker, .log-tags) { color: inherit; font-family: inherit; }
   body.cockpit .panel-body h2 { font-size: 1.9rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid var(--hud-soft); padding-bottom: 2px; }
   body.cockpit .panel-body h3 { font-size: 1.3rem; text-transform: uppercase; letter-spacing: 0.08em; }

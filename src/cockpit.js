@@ -8,21 +8,22 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 let seed = 1234567;
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 
-// Touches du clavier de bord : [légende, sous-titre, largeur, code clavier, action, voyant]
+// Commandes du tableau de bord : [légende, sous-titre, groupe, code clavier, action, voyant, forme, couleur]
+//   nav : croix de navigation au centre ; left / right : platines de part et d'autre
 export const COCKPIT_KEYS = [
-  ['↑', 'astre −', 1, 'ArrowUp', 'prevPlanet'],
-  ['↓', 'astre +', 1, 'ArrowDown', 'nextPlanet'],
-  ['←', 'satellite', 1, 'ArrowLeft', 'prevMoon'],
-  ['→', 'satellite', 1, 'ArrowRight', 'nextMoon'],
-  ['Échap', 'vue d’ensemble', 2, 'Escape', 'home'],
-  ['F', 'fiche', 1, 'KeyF', 'fiche', 'fiche'],
-  ['J', 'journal', 1, 'KeyJ', 'journal', 'journal'],
-  ['G', 'galerie', 1, 'KeyG', 'gallery', 'gallery'],
-  ['L', 'lunette', 1, 'KeyL', 'scope', 'scope'],
-  ['M', 'vol libre', 2, 'KeyM', 'free'],
-  ['O', 'orbites', 2, 'KeyO', 'orbits', 'orbits'],
-  ['Pilote auto', 'transfert', 4, null, null, 'transfer'],
-  ['H', 'affichage', 2, 'KeyH', 'hud', 'hud'],
+  ['▲', 'astre −', 'nav', 'ArrowUp', 'prevPlanet', null, 'up'],
+  ['▼', 'astre +', 'nav', 'ArrowDown', 'nextPlanet', null, 'down'],
+  ['◀', 'satellite', 'nav', 'ArrowLeft', 'prevMoon', null, 'left'],
+  ['▶', 'satellite', 'nav', 'ArrowRight', 'nextMoon', null, 'right'],
+  ['◎', 'vue d’ensemble', 'nav', 'Escape', 'home', null, 'center'],
+  ['F', 'fiche', 'left', 'KeyF', 'fiche', 'fiche', 'square'],
+  ['J', 'journal', 'left', 'KeyJ', 'journal', 'journal', 'square'],
+  ['H', 'affichage', 'left', 'KeyH', 'hud', 'hud', 'square'],
+  ['V', 'vue', 'left', 'KeyV', 'view', null, 'square'],
+  ['G', 'galerie', 'right', 'KeyG', 'gallery', 'gallery', 'round', 0xc0643a],
+  ['L', 'lunette', 'right', 'KeyL', 'scope', 'scope', 'round', 0x3f8f8a],
+  ['O', 'orbites', 'right', 'KeyO', 'orbits', 'orbits', 'round', 0xc9a13b],
+  ['M', 'mode', 'right', 'KeyM', 'free', null, 'round', 0x7a4a6a],
 ];
 
 function canvasTex(w, h, draw) {
@@ -130,18 +131,23 @@ export function createCockpit(renderer) {
     x.fillStyle = g; x.fillRect(0, 0, w, h);
     x.font = '38px VT323, monospace'; x.textBaseline = 'top';
     x.shadowColor = 'rgba(255,130,40,0.9)'; x.shadowBlur = 10;
+    // Bande de « tracking » VHS qui descend lentement l'écran
+    const band = ((performance.now() / 2600) % 1.3) * h - 30;
     lines.forEach((ln, i) => {
-      let px = 24 + (rnd() < 0.06 * k ? 7 : 0);
+      const y0 = 20 + i * 56;
+      const inBand = Math.abs(y0 + 18 - band) < 34;
+      let px = 24 + (inBand ? 6 + rnd() * 8 : rnd() < 0.05 * k ? 3 : 0);
       for (const ch of ln) {
         const r = rnd();
-        const a = r < 0.025 * k ? 0.08 : r < 0.08 * k ? 0.3 : 0.75 + rnd() * 0.25;
+        const a = r < 0.006 * k ? 0.15 : r < 0.03 * k ? 0.55 : inBand ? 0.6 + rnd() * 0.2 : 0.85 + rnd() * 0.15;
         x.fillStyle = `rgba(255,${150 + Math.floor(rnd() * 30)},60,${a})`;
         x.fillText(ch, px, 20 + i * 56 + (r > 0.985 ? -3 : 0));
         px += x.measureText(ch).width + 1.5;
       }
     });
     x.shadowBlur = 0;
-    for (let y = 0; y < h; y += 4) { x.fillStyle = 'rgba(0,0,0,0.28)'; x.fillRect(0, y, w, 1.5); }
+    for (let y = 0; y < h; y += 4) { x.fillStyle = 'rgba(0,0,0,0.3)'; x.fillRect(0, y, w, 1.5); }
+    x.fillStyle = 'rgba(255,170,90,0.07)'; x.fillRect(0, band, w, 26);
     tex.needsUpdate = true;
   }
 
@@ -205,67 +211,129 @@ export function createCockpit(renderer) {
     storm: onFascia(lamp(0xff5a3a), 70, 0.62), hud: onFascia(lamp(0xff8a2a), 66, 0.62),
   };
 
-  // Clavier mécanique posé sur le pupitre, incliné vers le pilote
-  const kb = new THREE.Group();
-  kb.position.set(0, 0.79, -0.6); kb.rotation.x = 0.16; kb.scale.setScalar(1.25);
-  scene.add(kb);
-  const KW = 0.62, KD = 0.17, COLS = 10, U = (KW - 0.05) / COLS;
-  const kbBase = new THREE.Mesh(new RoundedBoxGeometry(KW, 0.035, KD, 4, 0.012), darkMetal); kb.add(kbBase);
-  const kbRim = new THREE.Mesh(new RoundedBoxGeometry(KW + 0.016, 0.03, KD + 0.016, 4, 0.014), brass); kbRim.position.y = -0.006; kb.add(kbRim);
-  const capMat = new THREE.MeshStandardMaterial({ color: 0xf0e2c4, roughness: 0.45 });
+  // Commandes posées sur le pupitre : croix de navigation au centre, deux platines inclinées sur les côtés
+  const bakelite = new THREE.MeshStandardMaterial({ color: 0x3b2a22, roughness: 0.38, metalness: 0.05 });
+  const plateMat = new THREE.MeshStandardMaterial({ color: 0x241a14, roughness: 0.55, metalness: 0.35 });
+  const legendTex = (text, size, color = '#f2e3c6', w = 128, h = 128) => canvasTex(w, h, (c) => {
+    c.fillStyle = color; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `800 ${size}px Nunito, sans-serif`; c.fillText(text, w / 2, h / 2 + 2);
+  });
+  const engrave = (text, width) => {
+    const tex = canvasTex(256, 48, (c) => {
+      c.fillStyle = '#d9b98a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = '800 24px Nunito, sans-serif'; c.fillText(text.toUpperCase(), 128, 26);
+    });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(width, width * 48 / 256), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85 }));
+    m.rotation.x = -Math.PI / 2;
+    m.userData.redraw = () => { const c = tex.image.getContext('2d'); c.clearRect(0, 0, 256, 48); c.fillStyle = '#d9b98a'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '800 24px Nunito, sans-serif'; c.fillText(text.toUpperCase(), 128, 26); tex.needsUpdate = true; };
+    return m;
+  };
+  // Place un groupe sur le pupitre, à l'angle φ et au rayon r, tourné vers le pilote et un peu incliné
+  function onDesk(obj, phiDeg, r, tilt = 0.14) {
+    const phi = THREE.MathUtils.degToRad(phiDeg);
+    obj.position.set(Math.sin(phi) * r, 0.79, -Math.cos(phi) * r);
+    obj.lookAt(0, 0.79, 0);
+    obj.rotateX(tilt);
+    scene.add(obj);
+    return obj;
+  }
   const keys = [];
   const keyByCode = {};
-  let col = 0, row = 0;
-  for (const [lab, sub, span, code, action, led] of COCKPIT_KEYS) {
-    if (col + span > COLS) { col = 0; row++; }
-    const w = U * span;
-    const x = -KW / 2 + 0.025 + U * col + w / 2;
-    const z = -KD / 2 + 0.02 + U * row + U / 2;
-    const cap = new THREE.Group(); cap.position.set(x, 0.024, z); kb.add(cap);
-    const mat = capMat.clone(); mat.emissive = new THREE.Color(0xff7a20); mat.emissiveIntensity = 0;
-    const body = new THREE.Mesh(new RoundedBoxGeometry(w - 0.008, 0.02, U - 0.008, 4, 0.007), mat); cap.add(body);
-    const tex = canvasTex(Math.round(128 * span), 128);
-    const drawLegend = () => {
-      const c = tex.image.getContext('2d'), cw = tex.image.width;
-      c.clearRect(0, 0, cw, 128);
-      c.fillStyle = '#3a2614'; c.textAlign = 'center';
-      c.font = `800 ${lab.length > 3 ? 30 : 56}px Nunito, sans-serif`; c.fillText(lab, cw / 2, sub ? 70 : 82);
-      if (sub) { c.font = '800 19px Nunito, sans-serif'; c.fillStyle = '#7a5530'; c.fillText(sub.toUpperCase(), cw / 2, 106); }
-      tex.needsUpdate = true;
-    };
-    drawLegend();
-    const legend = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.014, U - 0.014), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-    legend.rotation.x = -Math.PI / 2; legend.position.y = 0.0102; cap.add(legend);
+  const redraws = [];
+  function makeKey(def, parent, x, z) {
+    const [lab, sub, , code, action, led, shape, color] = def;
+    const cap = new THREE.Group(); cap.position.set(x, 0, z); parent.add(cap);
+    let body, legendMat, size;
+    if (shape === 'round') {
+      size = 0.05;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(size / 2 + 0.004, 0.005, 10, 40), brass); ring.rotation.x = Math.PI / 2; ring.position.y = 0.006; parent.add(ring); ring.position.x = x; ring.position.z = z;
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.1, emissive: new THREE.Color(color), emissiveIntensity: 0 });
+      body = new THREE.Mesh(new THREE.CylinderGeometry(size / 2, size / 2 + 0.002, 0.018, 36), mat); body.position.y = 0.012; cap.add(body);
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(size / 2, 36, 10, 0, Math.PI * 2, 0, 0.35), mat); dome.scale.y = 0.6; dome.position.y = 0.012; cap.add(dome);
+      legendMat = new THREE.MeshBasicMaterial({ map: legendTex(lab, 70), transparent: true, color: 0xffffff });
+      const lg = new THREE.Mesh(new THREE.CircleGeometry(size * 0.38, 24), legendMat); lg.rotation.x = -Math.PI / 2; lg.position.y = 0.0245; cap.add(lg);
+      body.userData.extra = [dome, lg];
+    } else {
+      const big = shape === 'center';
+      size = big ? 0.044 : shape === 'square' ? 0.05 : 0.04;
+      const bezel = new THREE.Mesh(new RoundedBoxGeometry(size + 0.012, 0.01, size + 0.012, 3, 0.004), brass);
+      bezel.position.set(x, 0.004, z); parent.add(bezel);
+      if (big) bezel.visible = false;
+      body = big
+        ? new THREE.Mesh(new THREE.CylinderGeometry(size / 2, size / 2 + 0.003, 0.02, 36), new THREE.MeshStandardMaterial({ color: 0xe8d6b0, roughness: 0.35, emissive: 0xff7a20, emissiveIntensity: 0 }))
+        : new THREE.Mesh(new RoundedBoxGeometry(size, 0.022, size, 4, 0.008), bakelite.clone());
+      body.material.emissive = new THREE.Color(0xff7a20);
+      body.position.y = 0.013; cap.add(body);
+      legendMat = new THREE.MeshBasicMaterial({ map: legendTex(lab, shape === 'square' ? 64 : 58, big ? '#3a2614' : '#f2e3c6'), transparent: true, color: 0xffffff });
+      const lg = new THREE.Mesh(new THREE.PlaneGeometry(size * 0.8, size * 0.8), legendMat); lg.rotation.x = -Math.PI / 2; lg.position.y = 0.0245; cap.add(lg);
+      body.userData.extra = [lg];
+    }
     let ledMesh = null;
     if (led) {
-      ledMesh = lamp(0xff8a2a); ledMesh.scale.setScalar(0.35);
-      ledMesh.position.set(w / 2 - 0.012, 0.011, -U / 2 + 0.012); cap.add(ledMesh);
+      ledMesh = new THREE.Mesh(new THREE.SphereGeometry(0.0045, 12, 8), lampMat(0xff8a2a));
+      ledMesh.position.set(x + size / 2 + 0.008, 0.008, z - size / 2 + 0.004); parent.add(ledMesh);
     }
-    const k = { cap, mat, body, legend, ledMesh, led, action, code, press: 0, drawLegend };
-    body.userData.key = legend.userData.key = k;
+    const k = { cap, body, legendMat, ledMesh, led, action, code, press: 0, shape };
+    for (const m of [body, ...body.userData.extra]) m.userData.key = k;
     keys.push(k);
     if (code) keyByCode[code] = k;
-    col += span;
+    return k;
   }
+
+  // Croix de navigation dans une coupelle en laiton
+  const navPad = new THREE.Group();
+  onDesk(navPad, 0, 0.6, 0.18);
+  const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.125, 0.014, 64), brass); dish.position.y = 0.002; navPad.add(dish);
+  const dishIn = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.016, 64), plateMat); dishIn.position.y = 0.003; navPad.add(dishIn);
+  const navDefs = COCKPIT_KEYS.filter((d) => d[2] === 'nav');
+  const navPos = { up: [0, -0.062], down: [0, 0.062], left: [-0.062, 0], right: [0.062, 0], center: [0, 0] };
+  for (const d of navDefs) makeKey(d, navPad, ...navPos[d[6]]);
+  for (const [t, x, z, w] of [['astre −', 0, -0.142, 0.1], ['astre +', 0, 0.142, 0.1], ['satellite', -0.16, 0, 0.09], ['satellite', 0.16, 0, 0.09]]) {
+    const e = engrave(t, w); e.position.set(x, 0.01, z); if (Math.abs(x) > 0) e.rotation.z = 0; navPad.add(e); redraws.push(e);
+  }
+  { const e = engrave('vue d’ensemble · Échap', 0.15); e.position.set(0, 0.012, 0.03 + 0.002); e.position.z = 0.165; navPad.add(e); redraws.push(e); }
+
+  // Platines latérales
+  function sidePanel(group, phi) {
+    const defs = COCKPIT_KEYS.filter((d) => d[2] === group);
+    const panel = new THREE.Group();
+    onDesk(panel, phi, 0.64, 0.2);
+    const W = defs.length * 0.075 + 0.04, D = 0.13;
+    const plate = new THREE.Mesh(new RoundedBoxGeometry(W, 0.016, D, 4, 0.008), plateMat); plate.position.y = -0.002; panel.add(plate);
+    const rim = new THREE.Mesh(new RoundedBoxGeometry(W + 0.012, 0.012, D + 0.012, 4, 0.01), brass); rim.position.y = -0.006; panel.add(rim);
+    // Vis de fixation
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.003, 12), brass);
+      sc.position.set(sx * (W / 2 - 0.012), 0.007, sz * (D / 2 - 0.012)); panel.add(sc);
+    }
+    defs.forEach((d, i) => {
+      const x = -W / 2 + 0.02 + 0.075 * (i + 0.5);
+      makeKey(d, panel, x, -0.012);
+      const e = engrave(d[1], 0.07); e.position.set(x, 0.0075, 0.042); panel.add(e); redraws.push(e);
+    });
+  }
+  sidePanel('left', -30);
+  sidePanel('right', 30);
+
   // Manette des gaz (à droite) et manche (à gauche)
-  const throttle = new THREE.Group(); throttle.position.set(0.56, 0.79, -0.6); scene.add(throttle);
+  const throttle = new THREE.Group(); onDesk(throttle, 58, 0.64, 0);
   throttle.add(new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.03, 0.16, 4, 0.01), darkMetal));
   const lever = new THREE.Group(); lever.position.y = 0.015; throttle.add(lever);
   const tl = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.14, 12), brass); tl.position.y = 0.07; lever.add(tl);
   const tk = new THREE.Mesh(new THREE.SphereGeometry(0.022, 20, 16), new THREE.MeshStandardMaterial({ color: 0xe07a3a, roughness: 0.4 })); tk.position.y = 0.145; lever.add(tk);
-  const stick = new THREE.Group(); stick.position.set(-0.56, 0.79, -0.6); scene.add(stick);
+  const stick = new THREE.Group(); onDesk(stick, -58, 0.64, 0);
   stick.add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.025, 24), darkMetal));
   const stickArm = new THREE.Group(); stick.add(stickArm);
   const st = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.012, 0.15, 12), brass); st.position.y = 0.075; stickArm.add(st);
   const sk = new THREE.Mesh(new THREE.SphereGeometry(0.024, 20, 16), new THREE.MeshStandardMaterial({ color: 0x2a221c, roughness: 0.5 })); sk.position.y = 0.15; stickArm.add(sk);
 
   // Les légendes et écrans utilisent VT323 / Nunito : on les redessine une fois les polices prêtes
-  document.fonts?.ready.then(() => keys.forEach((k) => k.drawLegend()));
+  document.fonts?.ready.then(() => redraws.forEach((e) => e.userData.redraw()));
 
   // --- API ---
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
-  const keyMeshes = keys.flatMap((k) => [k.body, k.legend]);
+  const keyMeshes = keys.flatMap((k) => [k.body, ...k.body.userData.extra]);
   const tmp = new THREE.Vector3();
   let crtTimer = 0;
   const lit = {};
@@ -312,13 +380,15 @@ export function createCockpit(renderer) {
       for (const k of keys) {
         k.press = Math.max(0, k.press - dt * 5);
         const on = k.led && lit[k.led];
-        k.cap.position.y = 0.024 - (k.press > 0 ? 0.007 : 0) - (on && !k.code ? 0.004 : 0);
-        k.mat.emissiveIntensity = (on ? 0.35 : 0) + k.press * 0.5;
+        k.cap.position.y = k.press > 0 ? -0.006 : 0;
+        k.body.material.emissiveIntensity = (on ? (k.shape === 'round' ? 0.45 : 0.18) : 0) + k.press * 0.6;
+        // Légende rétroéclairée en orange quand la fonction est active
+        k.legendMat.color.setHex(on && k.shape !== 'round' ? 0xffa050 : 0xffffff);
         if (k.ledMesh) k.ledMesh.material.emissiveIntensity = on ? 3 : 0.15;
       }
       crtTimer -= dt;
       if (crtTimer <= 0) {
-        crtTimer = 0.2;
+        crtTimer = 0.12;
         drawCrt(crtL.userData.tex, s.crtLeft, 1);
         drawCrt(crtR.userData.tex, s.crtRight, 1);
       }
@@ -348,8 +418,8 @@ export function glitchify(root, k = 1) {
         s.className = 'gc';
         s.textContent = ch;
         const r = Math.random();
-        if (r < 0.01 * k) s.classList.add('g-drop');
-        else if (r < 0.035 * k) s.classList.add('g-ghost');
+        if (r < 0.003 * k) s.classList.add('g-drop');
+        else if (r < 0.012 * k) s.classList.add('g-ghost');
         word.appendChild(s);
       }
       frag.appendChild(word);
@@ -358,28 +428,43 @@ export function glitchify(root, k = 1) {
   }
   root.dataset[GLITCH_MARK] = '1';
 }
-// Fait « vivre » le grisaillement : quelques lettres changent d'état à chaque appel
+// Fait « vivre » le grisaillement : quelques lettres faiblissent un instant puis reviennent
+const flickered = new Set();
 export function flickerGlitch(roots, k = 1) {
+  for (const s of flickered) s.classList.remove('g-dim', 'g-drop', 'g-jit');
+  flickered.clear();
   for (const root of roots) {
     if (!root) continue;
     const all = root.getElementsByClassName('gc');
     if (!all.length) continue;
-    const n = Math.max(1, Math.round(all.length * 0.004 * k));
+    const n = Math.max(1, Math.round(all.length * 0.003 * k));
     for (let i = 0; i < n; i++) {
       const s = all[Math.floor(Math.random() * all.length)];
       const r = Math.random();
-      s.classList.remove('g-drop', 'g-ghost', 'g-jit');
-      if (r < 0.25) s.classList.add('g-drop');
-      else if (r < 0.65) s.classList.add('g-ghost');
-      else if (r < 0.8) s.classList.add('g-jit');
+      s.classList.add(r < 0.12 ? 'g-drop' : r < 0.8 ? 'g-dim' : 'g-jit');
+      flickered.add(s);
     }
   }
+}
+// Distorsion VHS : décalage horizontal par rangées (filtre SVG) et sursauts de « tracking »
+let vhsTimer = 0, vhsBurst = 0;
+export function updateVHS(dt) {
+  const turb = document.getElementById('vhs-turb'), disp = document.getElementById('vhs-disp');
+  if (!turb) return;
+  vhsTimer -= dt;
+  vhsBurst = Math.max(0, vhsBurst - dt);
+  if (vhsTimer > 0) return;
+  vhsTimer = 0.09;
+  if (Math.random() < 0.025) vhsBurst = 0.18 + Math.random() * 0.2;
+  turb.setAttribute('seed', String(Math.floor(Math.random() * 1000)));
+  turb.setAttribute('baseFrequency', `0 ${vhsBurst ? 0.025 : 0.06}`);
+  disp.setAttribute('scale', vhsBurst ? '9' : '2.2');
 }
 // Version SVG (texte sur les arcs de la verrière)
 export function glitchTspans(text, k = 1) {
   return [...text].map((ch) => {
     const r = Math.random();
-    const o = r < 0.012 * k ? 0.08 : r < 0.045 * k ? 0.3 : (0.75 + Math.random() * 0.25).toFixed(2);
+    const o = r < 0.004 * k ? 0.15 : r < 0.02 * k ? 0.5 : (0.75 + Math.random() * 0.25).toFixed(2);
     const esc = ch === '<' ? '&lt;' : ch === '&' ? '&amp;' : ch;
     return `<tspan opacity="${o}">${esc}</tspan>`;
   }).join('');

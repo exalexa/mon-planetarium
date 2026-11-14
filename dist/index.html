@@ -11,8 +11,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=VT323&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/mon-planetarium/assets/index--5VB2xH9.js"></script>
-    <link rel="stylesheet" crossorigin href="/mon-planetarium/assets/index-DEmBOmYV.css">
+    <script type="module" crossorigin src="/mon-planetarium/assets/index-ecsrAxsG.js"></script>
+    <link rel="stylesheet" crossorigin href="/mon-planetarium/assets/index-DDxwVTEJ.css">
   </head>
   <body>
     <canvas id="bg"></canvas>
@@ -34,22 +34,32 @@
 
     <!-- Choix du mode de pilotage -->
     <div id="mode-switch" role="group" aria-label="Mode de pilotage">
-      <button type="button" data-mode="auto" class="active" title="Le vaisseau vous emmène ; vue depuis le cockpit (touche M)">Pilote auto</button>
-      <button type="button" data-mode="free" title="Pilotez vous-même, vue à la troisième personne (touche M)">Vol libre</button>
+      <button type="button" data-mode="auto" class="active" title="Le vaisseau vous emmène (touche M)">Pilote auto</button>
+      <button type="button" data-mode="free" title="Pilotez vous-même (touche M)">Vol libre</button>
+      <button type="button" id="view-toggle" class="view-toggle" title="Vue depuis le cockpit ou de l'extérieur (touche V)">Vue cockpit</button>
     </div>
 
     <!-- Cockpit (mode pilote automatique) : le poste de pilotage est rendu en 3D ;
          le texte orangé est projeté sur la verrière -->
+    <!-- Filtre VHS : les rangées de texte se décalent horizontalement -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <filter id="vhs" x="-5%" y="0" width="110%" height="100%" color-interpolation-filters="sRGB">
+        <feTurbulence id="vhs-turb" type="fractalNoise" baseFrequency="0 0.06" numOctaves="1" seed="3" result="n" />
+        <feColorMatrix in="n" type="matrix" values="1 0 0 0 0  0 0 0 0 0.5  0 0 0 0 0  0 0 0 0 1" result="nx" />
+        <feDisplacementMap id="vhs-disp" in="SourceGraphic" in2="nx" scale="2.2" xChannelSelector="R" yChannelSelector="G" />
+      </filter>
+    </svg>
     <div id="glass-hud" aria-hidden="true">
+      <div class="vhs-band"></div>
       <div class="glass-sheen"></div>
       <svg class="glass-arcs" viewBox="0 0 1600 620" preserveAspectRatio="xMidYMin meet">
         <defs>
-          <path id="arc-top" d="M 330 250 A 560 300 0 0 1 1270 250" />
-          <path id="arc-bot" d="M 380 520 A 620 160 0 0 0 1220 520" />
+          <path id="arc-top" d="M 200 270 A 660 330 0 0 1 1400 270" />
+          <path id="arc-bot" d="M 200 540 A 1100 160 0 0 0 1400 540" />
         </defs>
         <g id="arc-ticks" stroke="#ff9a3c" stroke-width="2" opacity="0.45"></g>
-        <text font-size="28" letter-spacing="3"><textPath href="#arc-top" startOffset="50%" text-anchor="middle" id="arc-top-text"></textPath></text>
-        <text font-size="24" letter-spacing="3"><textPath href="#arc-bot" startOffset="50%" text-anchor="middle" id="arc-bot-text"></textPath></text>
+        <text font-size="26" letter-spacing="3"><textPath href="#arc-top" startOffset="50%" text-anchor="middle" id="arc-top-text"></textPath></text>
+        <text font-size="22" letter-spacing="3"><textPath href="#arc-bot" startOffset="50%" text-anchor="middle" id="arc-bot-text"></textPath></text>
       </svg>
       <div id="reticle"><span id="reticle-label"></span></div>
     </div>

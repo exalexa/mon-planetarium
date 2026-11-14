@@ -7,7 +7,7 @@ import {
   createAurora, createBowShock, createCME,
 } from './effects.js';
 import { createShip, createRover, globularCluster } from './models.js';
-import { createCockpit, glitchify, flickerGlitch, glitchTspans } from './cockpit.js';
+import { createCockpit, glitchify, flickerGlitch, glitchTspans, updateVHS } from './cockpit.js';
 import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
 import { TEXTS, GALLERIES } from './content.js';
@@ -786,13 +786,16 @@ function startTransition(target, prev = null) {
     // Départ posé au sol (base de lancement) : montée presque verticale avant de s'incliner
     const fromSurface = !!(dep && startOffset.length() < bodyRadius(dep) * 1.4);
     trail.userData.n = 0;
+    const baseDur = THREE.MathUtils.clamp(3.2 + dist / 260, 3.5, 9.5);
+    // Avant tout, le vaisseau pivote sur place vers sa destination (sauf au décollage depuis le sol)
+    const pivot = fromSurface ? 0 : 1.6;
     trans = {
       kind: 'transfer', from: fromP, dep, hub, startOffset, rDep: startOffset ? startOffset.length() : 0, fromSurface,
-      t: 0, d: dist,
+      t: 0, d: dist, fP: pivot / (baseDur + pivot),
       fA: fromSurface ? 0.26 : dep ? 0.2 : 0.06, fC: 0.24, thA: fromSurface ? 0.35 : 0.9, thC: 1.2,
       fovFrom: camera.userData.baseFov ?? 50,
       qFrom: camera.quaternion.clone(),
-      dur: THREE.MathUtils.clamp(3.2 + dist / 260, 3.5, 9.5),
+      dur: baseDur + pivot,
     };
     return;
   }
@@ -823,14 +826,25 @@ function startTransition(target, prev = null) {
 }
 
 // Position sur le transfert à l'instant t (0 → 1), recalculée avec les astres là où ils sont
+// Temps du transfert proprement dit, une fois le pivotement terminé
+const transT = (tr, t = tr.t) => (tr.fP ? Math.max(0, (t - tr.fP) / (1 - tr.fP)) : t);
 function transferPos(tr, t, f) {
+  t = transT(tr, t);
   const fB = 1 - tr.fA - tr.fC;
   const depC = tr.dep ? bodyCenter(tr.dep) : null;
+  const tgtNow = bodyCenter(current);
   const aPoint = (u) => {
     if (!tr.dep) return tr.from.clone();
-    const off = tr.startOffset.clone().applyAxisAngle(UP, tr.thA * u);
+    const off = tr.startOffset.clone();
+    if (tr.fromSurface) off.applyAxisAngle(UP, tr.thA * u);
+    else {
+      // Désorbitage : on quitte l'orbite en s'écartant progressivement vers la destination
+      const toward = tgtNow.clone().sub(depC).normalize();
+      const dir = off.clone().normalize().lerp(toward, 0.75 * u * u).normalize();
+      off.copy(dir).multiplyScalar(off.length());
+    }
     off.setLength(tr.rDep * (1 + (tr.fromSurface ? 4 : 1.3) * u));
-    off.y += tr.rDep * (tr.fromSurface ? 0.1 : 0.35) * u;
+    off.y += tr.rDep * (tr.fromSurface ? 0.1 : 0.25) * u;
     return depC.clone().add(off);
   };
   const tgtC = current.isLandmark ? f.look.clone() : bodyCenter(current);
@@ -866,7 +880,10 @@ function transferPos(tr, t, f) {
 function transferPhase(tr) {
   if (!tr) return null;
   if (tr.kind !== 'transfer') return 'En route';
+  if (tr.fP && tr.t < tr.fP) return 'Pivotement';
   const fB = 1 - tr.fA - tr.fC;
+  const T = transT(tr);
+  tr = { ...tr, t: T };
   if (tr.t < tr.fA) return tr.fromSurface ? (tr.t < tr.fA * 0.5 ? 'Décollage' : 'Mise en orbite basse') : 'Désorbitage';
   if (tr.t < tr.fA + fB * 0.35) return 'Accélération';
   if (tr.t < tr.fA + fB * 0.7) return 'Croisière';
@@ -897,13 +914,23 @@ function updateCamera(dt) {
     const qTarget = new THREE.Quaternion().setFromRotationMatrix(mTmp);
     if (T.lengthSq() > 1e-8) mTmp.lookAt(P, P.clone().add(T), UP);
     const qPath = new THREE.Quaternion().setFromRotationMatrix(mTmp);
-    const a = THREE.MathUtils.smoothstep(trans.t, 0, trans.fA + 0.06);
-    const b = THREE.MathUtils.smoothstep(trans.t, 1 - trans.fC * 0.85, 1);
-    camera.quaternion.copy(trans.qFrom).slerp(qPath, a).slerp(qTarget, b);
-    // Poussée : désorbitage, forte accélération, croisière moteurs coupés, freinage, insertion
-    const fB = 1 - trans.fA - trans.fC, t = trans.t;
-    autoThrust = t < trans.fA ? 0.55 : t < trans.fA + fB * 0.35 ? 1 : t < trans.fA + fB * 0.7 ? 0.08 : t < trans.fA + fB ? 0.85 : 0.4;
-    fov = targetFov + Math.sin(Math.PI * THREE.MathUtils.clamp((t - trans.fA) / fB, 0, 1)) * 4;
+    // Nez pointé vers la destination
+    mTmp.lookAt(P, bodyCenter(current), UP);
+    const qDest = new THREE.Quaternion().setFromRotationMatrix(mTmp);
+    const t = transT(trans);
+    const b = THREE.MathUtils.smoothstep(t, 1 - trans.fC * 0.85, 1);
+    if (trans.fP) {
+      // 1. pivotement sur place, 2. désorbitage et transfert le nez vers la destination
+      camera.quaternion.copy(trans.qFrom).slerp(qDest, smoother(Math.min(1, trans.t / trans.fP)));
+    } else {
+      camera.quaternion.copy(trans.qFrom).slerp(qPath, THREE.MathUtils.smoothstep(t, 0, trans.fA + 0.06))
+        .slerp(qDest, THREE.MathUtils.smoothstep(t, trans.fA, trans.fA + 0.2));
+    }
+    camera.quaternion.slerp(qTarget, b);
+    // Poussée : pivotement aux propulseurs d'attitude, désorbitage, accélération, croisière, freinage, insertion
+    const fB = 1 - trans.fA - trans.fC;
+    autoThrust = trans.fP && trans.t < trans.fP ? 0.12 : t < trans.fA ? 0.55 : t < trans.fA + fB * 0.35 ? 1 : t < trans.fA + fB * 0.7 ? 0.08 : t < trans.fA + fB ? 0.85 : 0.4;
+    fov = THREE.MathUtils.lerp(trans.fovFrom, targetFov, Math.min(1, trans.t * 4)) + Math.sin(Math.PI * THREE.MathUtils.clamp((t - trans.fA) / fB, 0, 1)) * 4;
     look.copy(f.look);
     if (trans.t >= 1) trans = null;
   } else if (trans) {
@@ -939,6 +966,21 @@ function updateCamera(dt) {
     camera.position.copy(f.pos);
     look.copy(f.look);
     camera.lookAt(look);
+  }
+  if (views.auto === 'tpv' && !current.telescope) {
+    // Vue extérieure : le vaisseau suit la trajectoire calculée, la caméra le suit de près
+    const P = camera.position.clone(), q = camera.quaternion.clone();
+    const d = THREE.MathUtils.clamp(P.distanceTo(bodyCenter(current)) * 0.1, 1.2, 16);
+    ship.visible = true;
+    ship.position.copy(P);
+    ship.quaternion.copy(q).multiply(qFlip);
+    ship.scale.setScalar(d * 0.075);
+    ship.userData.setThrust(autoThrust, simTime);
+    pushTrail(ship.localToWorld(new THREE.Vector3(0, 0, -1.1)), autoThrust);
+    camera.position.copy(P).add(new THREE.Vector3(0, d * 0.34, d * 1.1).applyQuaternion(q));
+    camera.up.set(0, 1, 0).applyQuaternion(q);
+    camera.lookAt(P.clone().add(new THREE.Vector3(0, 0, -d * 1.6).applyQuaternion(q)));
+    camera.up.set(0, 1, 0);
   }
   camera.userData.baseFov = trans ? fov : targetFov;
   // Oculaire : masque circulaire une fois dans la lunette
@@ -1002,7 +1044,7 @@ function updateDashboard(dt) {
   if (!cockpitLayout() || !current) { hudEl.ret.classList.remove('on'); return; }
   const tgt = bodyCenter(current);
   const dist = camera.position.distanceTo(tgt);
-  const phase = trans ? transferPhase(trans) : current.telescope ? 'À la lunette' : current.kind === 'star' ? 'Vue d’ensemble' : 'En orbite';
+  const phase = mode === 'free' ? (free.landed ? 'Posé' : 'Vol libre') : trans ? transferPhase(trans) : current.telescope ? 'À la lunette' : current.kind === 'star' ? 'Vue d’ensemble' : 'En orbite';
   const distTxt = current.telescope ? '≈ 17 000 al' : `${fmt(dist / UA, 3)} UA`;
   // Distance au soleil, convertie par l'échelle d = 190 × UA^0,7
   const helio = `${fmt(Math.pow(camera.position.length() / UA, 1 / 0.7), 2)} UA`;
@@ -1035,13 +1077,14 @@ function updateDashboard(dt) {
     hudTimer = 0.3;
     const bars = '▮'.repeat(Math.round(autoThrust * 5)) + '▯'.repeat(5 - Math.round(autoThrust * 5));
     hudEl.top.innerHTML = glitchTspans(`◉ ${current.name} · ${current.section.toUpperCase()} ── ${phase.toUpperCase()} ── ${distTxt}`);
-    hudEl.bot.innerHTML = glitchTspans(`VIT ${fmt(camSpeed / UA, 2)} UA/S  ·  POUSSÉE ${bars}  ·  ${document.getElementById('sw-text').textContent.toUpperCase()}`);
+    hudEl.bot.innerHTML = glitchTspans(`VIT ${fmt(camSpeed / UA, 2)} UA/S  ·  POUSSÉE ${bars}  ·  VENT ${Math.round(320 + wind * 420)} KM/S${cmes.some((c) => c.active) ? '  ·  ÉMC EN VOL' : ''}`);
   }
   flickerTimer -= dt;
   if (flickerTimer <= 0) {
     flickerTimer = 0.09;
     flickerGlitch([ui.panelBody, tree.querySelector('.tree-inner')]);
   }
+  updateVHS(dt);
 
   // Réticule autour de la cible
   const w = window.innerWidth, h = window.innerHeight;
@@ -1063,7 +1106,7 @@ function cockpitAction(a) {
   const b = document.body.classList;
   ({
     prevPlanet: () => stepPlanet(-1), nextPlanet: () => stepPlanet(1), prevMoon: () => stepMoon(-1), nextMoon: () => stepMoon(1),
-    home: () => goTo('lexa'), free: () => setMode('free'),
+    home: () => goTo('lexa'), free: () => setMode(mode === 'auto' ? 'free' : 'auto'), view: () => toggleView(),
     fiche: () => b.toggle('hide-fiche'), journal: () => b.toggle('hide-journal'), hud: () => b.toggle('hide-hud'),
     orbits: () => { showOrbits = !showOrbits; },
     gallery: () => { const g = ui.panelBody.querySelector('[data-gallery]'); if (g) openGallery(g.dataset.gallery); },
@@ -1088,7 +1131,7 @@ function pushTrail(p, w) {
 }
 
 // Cockpit sur grand écran : la vue se limite à la verrière (64 % supérieurs de l'écran)
-function cockpitLayout() { return mode === 'auto' && window.innerWidth > 760; }
+function cockpitLayout() { return window.innerWidth > 760 && views[mode] === 'fpv' && !(mode === 'free' && free.rover); }
 function computeViewOffset() {
   const w = window.innerWidth, h = window.innerHeight;
   const mobile = w <= 760;
@@ -1119,6 +1162,27 @@ function computeViewOffset() {
 const MODE_KEY = 'sysE139.mode';
 let mode = 'auto';
 try { mode = localStorage.getItem(MODE_KEY) === 'free' ? 'free' : 'auto'; } catch (e) { /* ignore */ }
+// Vue à la première personne (cockpit) ou à la troisième personne, réglable dans chaque mode
+const VIEW_KEY = 'sysE139.views';
+const views = { auto: 'fpv', free: 'tpv' };
+try { Object.assign(views, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch (e) { /* ignore */ }
+const qFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+function syncLayout() {
+  document.body.classList.toggle('cockpit', cockpitLayout());
+  const btn = document.getElementById('view-toggle');
+  btn.textContent = views[mode] === 'fpv' ? 'Vue cockpit' : 'Vue extérieure';
+  btn.classList.toggle('fpv', views[mode] === 'fpv');
+  if (cockpitLayout() && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
+  if (cockpitLayout() && ui.panelBody.textContent && !ui.panelBody.querySelector('.gc')) glitchify(ui.panelBody);
+  computeViewOffset();
+}
+function toggleView() {
+  views[mode] = views[mode] === 'fpv' ? 'tpv' : 'fpv';
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(views)); } catch (e) { /* ignore */ }
+  trail.userData.n = 0;
+  syncLayout();
+}
+document.getElementById('view-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggleView(); e.currentTarget.blur(); });
 const free = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), offset: new THREE.Vector3(), ang: new THREE.Vector3(),
   anchor: null, target: null, near: null, keys: new Set(), dist: 8, camPos: new THREE.Vector3(), init: false,
@@ -1256,11 +1320,9 @@ function setMode(m, silent = false) {
   if (m === mode && !silent) return;
   mode = m;
   try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* ignore */ }
-  document.body.classList.toggle('cockpit', m === 'auto');
   document.body.classList.toggle('free', m === 'free');
-  document.querySelectorAll('#mode-switch button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
-  computeViewOffset();
-  if (m === 'auto' && window.innerWidth > 760 && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
+  document.querySelectorAll('#mode-switch button[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
+  syncLayout();
   if (silent || !ready) return;
   if (m === 'free') {
     enterFree();
@@ -1297,6 +1359,7 @@ function freeAction() {
     if (d < free.shipScale * 3.5 + free.rover.scale * 6) {
       free.rover = null;
       rover.visible = false;
+      syncLayout();
       hint('De retour à bord · Espace ou Z pour décoller', 5);
     } else {
       hint('Rapprochez-vous du vaisseau pour remonter à bord', 3);
@@ -1315,6 +1378,7 @@ function freeAction() {
   free.rover = { body: b, scale: s, speed: 0, local: b.obj.worldToLocal(start.clone()), localFwd: fwd.clone().transformDirection(inv) };
   rover.visible = true;
   rover.scale.setScalar(s);
+  syncLayout();
   hint('Véhicule : Z / S avancer et reculer, Q / D tourner · E pour remonter (près du vaisseau)', 7);
 }
 
@@ -1455,8 +1519,24 @@ function updateFree(dt) {
     .multiply(qStep.setFromAxisAngle(AX.y, user.yaw))
     .multiply(new THREE.Quaternion().setFromAxisAngle(AX.x, -user.pitch));
   const dist = free.dist * free.shipScale / 0.9;
-  const camWant = free.pos.clone().add(new THREE.Vector3(0, dist * 0.3, -dist).applyQuaternion(qLook));
-  followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, dist * 0.1, dist * 0.8).applyQuaternion(qLook)), camUp);
+  if (views.free === 'fpv') {
+    // À bord : la caméra est au poste de pilotage et regarde vers l'avant du vaisseau
+    ship.visible = false;
+    camera.position.copy(free.pos).add(new THREE.Vector3(0, 0.3, 0.25).multiplyScalar(free.shipScale).applyQuaternion(ship.quaternion));
+    camera.quaternion.copy(ship.quaternion)
+      .multiply(qStep.setFromAxisAngle(AX.y, user.yaw))
+      .multiply(new THREE.Quaternion().setFromAxisAngle(AX.x, -user.pitch))
+      .multiply(qFlip);
+    camera.up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    free.camPos.copy(camera.position);
+    free.lastRef = null;
+    sky.visible = true;
+    document.getElementById('eyepiece').classList.remove('on');
+    document.body.classList.remove('in-scope');
+  } else {
+    const camWant = free.pos.clone().add(new THREE.Vector3(0, dist * 0.3, -dist).applyQuaternion(qLook));
+    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, dist * 0.1, dist * 0.8).applyQuaternion(qLook)), camUp);
+  }
   freeHud(dt, boost);
 }
 
@@ -1546,8 +1626,19 @@ function updateRover(dt) {
   const dist = r.scale * 9 * (free.dist / 8);
   const qLook = new THREE.Quaternion().setFromAxisAngle(up, user.yaw);
   const back = fwd.clone().applyQuaternion(qLook);
-  const want = pos.clone().addScaledVector(back, -dist).addScaledVector(up, dist * (0.75 + user.pitch * 0.4));
-  followCamera(dt, want, pos.clone().addScaledVector(back, r.scale * 3).addScaledVector(up, r.scale * 0.6), up);
+  if (views.free === 'fpv') {
+    // Au volant : la caméra est dans la cabine du véhicule
+    rover.visible = false;
+    camera.position.copy(pos).addScaledVector(up, r.scale * 1.1).addScaledVector(fwd, r.scale * 0.3);
+    camera.up.copy(up);
+    camera.lookAt(camera.position.clone().addScaledVector(back, r.scale * 10).addScaledVector(up, -r.scale * (1 + user.pitch * 4)));
+    free.camPos.copy(camera.position);
+    free.lastRef = null;
+  } else {
+    rover.visible = true;
+    const want = pos.clone().addScaledVector(back, -dist).addScaledVector(up, dist * (0.75 + user.pitch * 0.4));
+    followCamera(dt, want, pos.clone().addScaledVector(back, r.scale * 3).addScaledVector(up, r.scale * 0.6), up);
+  }
   document.getElementById('free-speed').textContent = `Véhicule sur ${b.name}${water ? ' · navigation' : ''} · ${fmt(Math.abs(r.speed) / r.scale * 4, 1)} km/h`;
   updateTargetMarker();
   applyProjection(dt, 55);
@@ -1784,6 +1875,7 @@ window.addEventListener('keydown', (e) => {
   if (!current || e.target.closest?.('input, textarea')) return;
   if (cockpitLayout()) cockpit.press(cockpit.keyFor(e.code));
   if (e.code === 'KeyM') { setMode(mode === 'auto' ? 'free' : 'auto'); return; }
+  if (e.code === 'KeyV' && !e.ctrlKey) { toggleView(); return; }
   if (mode === 'free') {
     if (e.code === 'KeyE') { freeAction(); return; }
     if (e.ctrlKey) free.keys.add('ctrl');
@@ -1934,7 +2026,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(w, h);
   composer.setSize(w, h);
   cockpit.resize(w, h);
-  computeViewOffset();
+  syncLayout();
 });
 
 // ---------------------------------------------------------------------------
