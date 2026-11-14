@@ -1,13 +1,131 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/mon-planetarium/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Portfolio</title>
+    <meta name="description" content="Portfolio d'Axel Mannu Corrieras : physique, ingénierie et arts, à explorer comme un petit système solaire." />
+    <meta name="theme-color" content="#05060c" />
+    <title>Axel Mannu Corrieras · Sys-E139</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
   </head>
   <body>
     <canvas id="bg"></canvas>
+
+    <!-- Écran de chargement : réveil au coin du feu -->
+    <div id="loader" aria-live="polite">
+      <div class="ember"></div>
+      <p class="loader-title">Réveil…</p>
+      <div class="loader-bar"><span id="loader-progress"></span></div>
+      <p class="loader-hint" id="loader-percent">0 %</p>
+    </div>
+
+    <h1 id="planetarium-title">Sys-E139</h1>
+
+    <div id="loop-timer" title="Le soleil est stable. Pour l'instant.">
+      <span class="loop-sun"></span><span class="loop-label">Boucle</span><span id="loop-time">22:00</span>
+    </div>
+    <div id="space-weather" aria-live="polite"><span class="sw-dot"></span><span id="sw-text">Vent solaire calme</span></div>
+
+    <!-- Choix du mode de pilotage -->
+    <div id="mode-switch" role="group" aria-label="Mode de pilotage">
+      <button type="button" data-mode="auto" class="active" title="Le vaisseau vous emmène ; vue depuis le cockpit (touche M)">Pilote auto</button>
+      <button type="button" data-mode="free" title="Pilotez vous-même, vue à la troisième personne (touche M)">Vol libre</button>
+    </div>
+
+    <!-- Cockpit (mode pilote automatique) : verrière en haut, console en bas avec ses écrans -->
+    <div id="cockpit" aria-hidden="true">
+      <svg class="cockpit-frame" viewBox="0 0 1600 620" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="ck-metal" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3a2f27" /><stop offset="0.6" stop-color="#241c17" /><stop offset="1" stop-color="#1a130e" />
+          </linearGradient>
+        </defs>
+        <path fill="url(#ck-metal)" fill-rule="evenodd" d="M0 0H1600V620H0Z M140 64 C 520 14, 1080 14, 1460 64 C 1540 220, 1545 430, 1490 596 C 1060 610, 540 610, 110 596 C 55 430, 60 220, 140 64 Z" />
+        <path d="M140 64 C 340 220, 380 440, 330 604" stroke="#2b221b" stroke-width="14" fill="none" />
+        <path d="M1460 64 C 1260 220, 1220 440, 1270 604" stroke="#2b221b" stroke-width="14" fill="none" />
+        <path d="M140 64 C 520 14, 1080 14, 1460 64 C 1540 220, 1545 430, 1490 596 C 1060 610, 540 610, 110 596 C 55 430, 60 220, 140 64 Z" stroke="#c98a4a" stroke-opacity="0.35" stroke-width="3" fill="none" />
+        <g fill="#8a6a4a" opacity="0.7">
+          <circle cx="300" cy="40" r="5" /><circle cx="560" cy="27" r="5" /><circle cx="800" cy="23" r="5" /><circle cx="1040" cy="27" r="5" /><circle cx="1300" cy="40" r="5" />
+          <circle cx="86" cy="260" r="5" /><circle cx="82" cy="430" r="5" /><circle cx="1514" cy="260" r="5" /><circle cx="1518" cy="430" r="5" />
+        </g>
+      </svg>
+      <div class="console">
+        <div class="console-trim"></div>
+        <div class="console-slot left"><span>Fiche</span></div>
+        <div class="console-slot right"><span>Journal de bord</span></div>
+      </div>
+      <div class="dash">
+        <div class="dash-gauge"><div class="gauge-needle" id="dash-needle"></div><span>Poussée</span></div>
+        <div class="dash-screen">
+          <div class="dash-row"><span>Cible</span><b id="dash-target">LEXA</b></div>
+          <div class="dash-row"><span>Phase</span><b id="dash-status">En orbite</b></div>
+          <div class="dash-row"><span>Distance</span><b id="dash-dist">–</b></div>
+          <div class="dash-row"><span>Vitesse</span><b id="dash-speed">–</b></div>
+          <div class="dash-row"><span>Héliocentre</span><b id="dash-helio">–</b></div>
+        </div>
+        <div class="dash-gauge"><div class="gauge-needle" id="dash-needle2"></div><span>Vent solaire</span></div>
+      </div>
+    </div>
+
+    <!-- Vol libre : repère de cible, proximité, aide et commandes tactiles -->
+    <div id="free-hud" aria-live="polite">
+      <div id="target-marker"><span class="tm-ring"></span><span class="tm-label" id="tm-label"></span></div>
+      <div id="near-label"></div>
+      <div id="free-speed"></div>
+      <div id="free-hint"></div>
+      <div id="free-help">
+        <b>Vol libre</b>
+        <span><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> : avancer, reculer, aller à gauche / à droite</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> tangage · <kbd>←</kbd><kbd>→</kbd> lacet</span>
+        <span><kbd>Ctrl</kbd> + <kbd>←</kbd><kbd>→</kbd> roulis · <kbd>Ctrl</kbd> + <kbd>↑</kbd><kbd>↓</kbd> monter / descendre</span>
+        <span><kbd>Maj</kbd> propulsion rapide · <kbd>E</kbd> sortir le véhicule une fois posé</span>
+        <span>Glisser : regarder autour · molette : recul de la caméra</span>
+        <span>Cliquer un astre ou le journal : le désigner comme cible</span>
+      </div>
+      <div id="flight-pad">
+        <button type="button" data-key="up" aria-label="Monter">⇡</button>
+        <button type="button" data-key="fwd" aria-label="Avancer">▲</button>
+        <button type="button" data-key="down" aria-label="Descendre">⇣</button>
+        <button type="button" data-key="left" aria-label="Gauche">◀</button>
+        <button type="button" data-key="back" aria-label="Reculer">▼</button>
+        <button type="button" data-key="right" aria-label="Droite">▶</button>
+        <button type="button" data-key="boost" aria-label="Propulsion rapide">⇧</button>
+        <button type="button" data-key="action" class="wide" aria-label="Véhicule">Véhicule (E)</button>
+      </div>
+    </div>
+
+    <aside id="astro-info-container" aria-live="polite">
+      <div class="panel-body"></div>
+    </aside>
+
+    <nav id="hud-nav" aria-label="Navigation entre les astres">
+      <button type="button" data-nav="up" title="Astre précédent (↑)" aria-label="Astre précédent">▲</button>
+      <button type="button" data-nav="left" title="Satellite précédent (←)" aria-label="Satellite précédent">◀</button>
+      <div id="hud-location">
+        <span id="hud-path">LEXA</span>
+        <span id="hud-section">Accueil</span>
+      </div>
+      <button type="button" data-nav="right" title="Satellite suivant (→)" aria-label="Satellite suivant">▶</button>
+      <button type="button" data-nav="down" title="Astre suivant (↓)" aria-label="Astre suivant">▼</button>
+    </nav>
+
+    <div id="project-overlay" role="dialog" aria-modal="true"></div>
+    <div id="flash"></div>
+
+    <!-- Vue dans l'oculaire de la grande lunette -->
+    <div id="eyepiece" aria-hidden="true">
+      <div class="eyepiece-ring"></div>
+      <div class="eyepiece-info">
+        <span>Grande lunette · Meudon</span>
+        <span>ω Centauri · α 13h 26m 47s · δ −47° 28′ 46″</span>
+        <span class="eyepiece-track">Suivi sidéral actif</span>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
