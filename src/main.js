@@ -7,6 +7,7 @@ import {
   createAurora, createBowShock, createCME,
 } from './effects.js';
 import { createShip, createRover, globularCluster } from './models.js';
+import { createCockpit, glitchify, flickerGlitch, glitchTspans } from './cockpit.js';
 import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
 import { TEXTS, GALLERIES } from './content.js';
@@ -31,6 +32,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
+const cockpit = createCockpit(renderer);
+cockpit.resize(window.innerWidth, window.innerHeight);
+let glassPx = cockpit.glassBottom(window.innerHeight);
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 30000);
 camera.position.set(0, 900, 1600);
 
@@ -946,7 +950,7 @@ function updateCamera(dt) {
   if (inScope) {
     const ep = document.getElementById('eyepiece').style;
     const W = window.innerWidth, H = window.innerHeight;
-    const d = cockpitLayout() ? H * 0.54 : Math.min(H * 0.78, W * 0.7);
+    const d = cockpitLayout() ? Math.min(glassPx * 0.86, W * 0.7) : Math.min(H * 0.78, W * 0.7);
     const ey = H / 2 - viewOffset.y;
     ep.setProperty('--ex', `${W / 2 - viewOffset.x}px`);
     ep.setProperty('--ey', `${ey}px`);
@@ -975,20 +979,96 @@ const lastCam = new THREE.Vector3();
 let camSpeed = 0;
 const UA = 190; // 1 UA = 190 unités de la scène
 const fmt = (x, d = 2) => x.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+const sunDirCam = new THREE.Vector3(), camInv = new THREE.Quaternion();
+const hudEl = {
+  top: document.getElementById('arc-top-text'), bot: document.getElementById('arc-bot-text'),
+  ret: document.getElementById('reticle'), retLabel: document.getElementById('reticle-label'),
+};
+{
+  // Graduations de cap le long de l'arc supérieur de la verrière
+  let t = '';
+  for (let a = -60; a <= 60; a += 5) {
+    const r = (a - 90) * Math.PI / 180, cx = 800, cy = 470, rx = 560, ry = 300, k = a % 15 === 0 ? 0.94 : 0.97;
+    t += `<line x1="${(cx + Math.cos(r) * rx).toFixed(1)}" y1="${(cy + Math.sin(r) * ry).toFixed(1)}" x2="${(cx + Math.cos(r) * rx * k).toFixed(1)}" y2="${(cy + Math.sin(r) * ry * k).toFixed(1)}" />`;
+  }
+  document.getElementById('arc-ticks').innerHTML = t;
+}
+let hudTimer = 0, flickerTimer = 0;
+let showOrbits = true;
 function updateDashboard(dt) {
   const v = camera.position.distanceTo(lastCam) / Math.max(dt, 1e-3);
   lastCam.copy(camera.position);
   camSpeed += (v - camSpeed) * Math.min(1, dt * 4);
-  if (mode !== 'auto' || !current) return;
+  if (!cockpitLayout() || !current) { hudEl.ret.classList.remove('on'); return; }
   const tgt = bodyCenter(current);
-  document.getElementById('dash-target').textContent = current.name;
-  document.getElementById('dash-status').textContent = trans ? transferPhase(trans) : current.telescope ? 'À la lunette' : current.kind === 'star' ? 'Vue d’ensemble' : 'En orbite';
-  document.getElementById('dash-dist').textContent = current.telescope ? '≈ 17 000 al' : `${fmt(camera.position.distanceTo(tgt) / UA, 3)} UA`;
-  document.getElementById('dash-speed').textContent = `${fmt(camSpeed / UA, 2)} UA/s`;
+  const dist = camera.position.distanceTo(tgt);
+  const phase = trans ? transferPhase(trans) : current.telescope ? 'À la lunette' : current.kind === 'star' ? 'Vue d’ensemble' : 'En orbite';
+  const distTxt = current.telescope ? '≈ 17 000 al' : `${fmt(dist / UA, 3)} UA`;
   // Distance au soleil, convertie par l'échelle d = 190 × UA^0,7
-  document.getElementById('dash-helio').textContent = `${fmt(Math.pow(camera.position.length() / UA, 1 / 0.7), 2)} UA`;
-  document.getElementById('dash-needle').style.transform = `rotate(${-110 + 220 * autoThrust}deg)`;
-  document.getElementById('dash-needle2').style.transform = `rotate(${-110 + 220 * THREE.MathUtils.clamp(windLevel, 0, 1)}deg)`;
+  const helio = `${fmt(Math.pow(camera.position.length() / UA, 1 / 0.7), 2)} UA`;
+  const storm = Math.max(0, ...MAGNETIC.map((p) => p.storm));
+  const wind = THREE.MathUtils.clamp(windLevel, 0, 1);
+  // Lumière de l'étoile dans le repère du cockpit
+  camInv.copy(camera.quaternion).invert();
+  sunDirCam.copy(camera.position).negate().applyQuaternion(camInv).normalize();
+  const sunPower = THREE.MathUtils.clamp(2.2 * Math.pow(UA / Math.max(camera.position.length(), 1), 0.5), 0.25, 2.2);
+  const b = document.body.classList;
+  cockpit.setLit('transfer', !!trans);
+  cockpit.setLit('fiche', !b.contains('hide-fiche'));
+  cockpit.setLit('journal', !b.contains('hide-journal'));
+  cockpit.setLit('hud', !b.contains('hide-hud'));
+  cockpit.setLit('orbits', showOrbits);
+  cockpit.setLit('scope', !!current.telescope);
+  cockpit.setLit('gallery', !!ui.panelBody.querySelector('[data-gallery]'));
+  cockpit.update(dt, {
+    thrust: autoThrust, wind, storm, sunDir: sunDirCam, sunPower,
+    dist: current.telescope ? 1 : THREE.MathUtils.clamp(Math.log10(1 + dist / 4) / 3, 0, 1),
+    loop: 1 - loopLeft / LOOP,
+    turn: THREE.MathUtils.clamp(user.tYaw * 0.5, -1, 1), pitch: THREE.MathUtils.clamp(user.tPitch * 0.5, -1, 1),
+    crtLeft: ['MÉTÉO SPATIALE', `VENT   ${Math.round(320 + wind * 420)} KM/S`, `ÉMC    ${storm > 0.2 ? 'IMPACT' : 'AUCUNE'}`, `AURORES ${storm > 0.2 ? 'ACTIVES' : 'CALMES'}`, `BOUCLE ${ui.time.textContent}`],
+    crtRight: ['NAVIGATION', `CIBLE  ${current.name}`, `PHASE  ${phase.toUpperCase()}`, `DIST   ${distTxt}`, `HÉLIO  ${helio}`],
+  });
+
+  // Texte sur les arcs de la verrière
+  hudTimer -= dt;
+  if (hudTimer <= 0) {
+    hudTimer = 0.3;
+    const bars = '▮'.repeat(Math.round(autoThrust * 5)) + '▯'.repeat(5 - Math.round(autoThrust * 5));
+    hudEl.top.innerHTML = glitchTspans(`◉ ${current.name} · ${current.section.toUpperCase()} ── ${phase.toUpperCase()} ── ${distTxt}`);
+    hudEl.bot.innerHTML = glitchTspans(`VIT ${fmt(camSpeed / UA, 2)} UA/S  ·  POUSSÉE ${bars}  ·  ${document.getElementById('sw-text').textContent.toUpperCase()}`);
+  }
+  flickerTimer -= dt;
+  if (flickerTimer <= 0) {
+    flickerTimer = 0.09;
+    flickerGlitch([ui.panelBody, tree.querySelector('.tree-inner')]);
+  }
+
+  // Réticule autour de la cible
+  const w = window.innerWidth, h = window.innerHeight;
+  const c = tmpV.copy(tgt).project(camera);
+  const x = (c.x * 0.5 + 0.5) * w, y = (-c.y * 0.5 + 0.5) * h;
+  const show = !current.telescope && current.kind !== 'star' && c.z < 1 && y < glassPx - 20 && x > 0 && x < w;
+  hudEl.ret.classList.toggle('on', show);
+  if (show) {
+    const R = (current.viewRadius || bodyRadius(current)) * 1.15;
+    const r = THREE.MathUtils.clamp((R / Math.max(dist, 1e-3)) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * h / 2, 30, h * 0.2);
+    Object.assign(hudEl.ret.style, { left: `${x - r}px`, top: `${y - r}px`, width: `${2 * r}px`, height: `${2 * r}px` });
+    const label = `${current.name} ▸ ${distTxt}`;
+    if (hudEl.retLabel.dataset.t !== label) { hudEl.retLabel.dataset.t = label; hudEl.retLabel.textContent = label; }
+  }
+}
+
+// Clavier de bord
+function cockpitAction(a) {
+  const b = document.body.classList;
+  ({
+    prevPlanet: () => stepPlanet(-1), nextPlanet: () => stepPlanet(1), prevMoon: () => stepMoon(-1), nextMoon: () => stepMoon(1),
+    home: () => goTo('lexa'), free: () => setMode('free'),
+    fiche: () => b.toggle('hide-fiche'), journal: () => b.toggle('hide-journal'), hud: () => b.toggle('hide-hud'),
+    orbits: () => { showOrbits = !showOrbits; },
+    gallery: () => { const g = ui.panelBody.querySelector('[data-gallery]'); if (g) openGallery(g.dataset.gallery); },
+    scope: () => goTo(current?.telescope ? 'meudon' : 'omega'),
+  })[a]?.();
 }
 
 // Traînée du réacteur
@@ -1013,8 +1093,10 @@ function computeViewOffset() {
   const w = window.innerWidth, h = window.innerHeight;
   const mobile = w <= 760;
   if (cockpitLayout()) {
+    glassPx = cockpit.glassBottom(h);
+    document.body.style.setProperty('--glass-bottom', `${glassPx}px`);
     viewOffset.tx = 0;
-    viewOffset.ty = h / 2 - h * 0.31;
+    viewOffset.ty = h / 2 - glassPx / 2;
     return;
   }
   if (mobile) {
@@ -1178,6 +1260,7 @@ function setMode(m, silent = false) {
   document.body.classList.toggle('free', m === 'free');
   document.querySelectorAll('#mode-switch button').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
   computeViewOffset();
+  if (m === 'auto' && window.innerWidth > 760 && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
   if (silent || !ready) return;
   if (m === 'free') {
     enterFree();
@@ -1612,6 +1695,7 @@ function updatePanel() {
     if (!html) return;
     ui.panel.scrollTop = 0;
     reveal(html, ui.panelBody);
+    if (cockpitLayout()) glitchify(ui.panelBody);
     ui.panel.classList.add('visible');
     computeViewOffset();
   }, 260);
@@ -1634,7 +1718,7 @@ function updateLabels() {
       c.y += (b.viewRadius || 3) * (b.kind === 'star' ? 1.05 : 1.2);
       c.project(camera);
       const sy = (-c.y * 0.5 + 0.5) * h;
-      if (c.z > 1 || c.z < -1 || (cockpitLayout() && sy > h * 0.6)) show = false;
+      if (c.z > 1 || c.z < -1 || (cockpitLayout() && sy > glassPx - 10)) show = false;
       else {
         el.style.left = `${(c.x * 0.5 + 0.5) * w}px`;
         el.style.top = `${(-c.y * 0.5 + 0.5) * h}px`;
@@ -1652,10 +1736,10 @@ function updateOrbits() {
   const g = current ? groupOf(current) : null;
   for (const p of SYSTEM) {
     if (p.mapDot) p.mapDot.visible = !current || current.kind === 'star' || g !== p;
-    if (p.orbitLine) p.orbitLine.material.opacity = current?.kind === 'star' ? 0.28 : 0.12;
+    if (p.orbitLine) { p.orbitLine.material.opacity = current?.kind === 'star' ? 0.28 : 0.12; p.orbitLine.visible = showOrbits; }
     for (const c of p.children) {
       if (!c.orbitLine) continue;
-      const target = g === p ? 0.3 : 0;
+      const target = g === p && showOrbits ? 0.3 : 0;
       c.orbitLine.material.opacity += (target - c.orbitLine.material.opacity) * 0.08;
       c.orbitLine.visible = c.orbitLine.material.opacity > 0.01;
     }
@@ -1698,6 +1782,7 @@ document.addEventListener('click', (e) => {
 window.addEventListener('keydown', (e) => {
   if (overlayOpen) { if (e.key === 'Escape') closeGallery(); return; }
   if (!current || e.target.closest?.('input, textarea')) return;
+  if (cockpitLayout()) cockpit.press(cockpit.keyFor(e.code));
   if (e.code === 'KeyM') { setMode(mode === 'auto' ? 'free' : 'auto'); return; }
   if (mode === 'free') {
     if (e.code === 'KeyE') { freeAction(); return; }
@@ -1707,7 +1792,9 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   const k = { ArrowDown: () => stepPlanet(1), ArrowUp: () => stepPlanet(-1), ArrowRight: () => stepMoon(1), ArrowLeft: () => stepMoon(-1), Escape: () => goTo('lexa') }[e.key];
-  if (k) { e.preventDefault(); k(); }
+  if (k) { e.preventDefault(); k(); return; }
+  const ck = cockpit.keyFor(e.code);
+  if (ck?.action && !e.ctrlKey && !e.metaKey && !e.altKey) cockpitAction(ck.action);
 });
 window.addEventListener('keyup', (e) => {
   const k = KEYMAP[e.code];
@@ -1725,13 +1812,17 @@ const raycaster = new THREE.Raycaster();
 raycaster.params.Points.threshold = 0.6;
 const pointer = { down: false, x: 0, y: 0, moved: 0, id: null };
 canvas.addEventListener('pointerdown', (e) => {
+  if (cockpitLayout()) {
+    const k = cockpit.keyAt(e.clientX, e.clientY);
+    if (k) { cockpit.press(k); if (k.action) cockpitAction(k.action); pointer.skip = true; return; }
+  }
   pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY; pointer.moved = 0; pointer.id = e.pointerId;
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!pointer.down) {
     // Survol : curseur main sur les astres
-    if (ready) canvas.style.cursor = pick(e.clientX, e.clientY) ? 'pointer' : 'grab';
+    if (ready) canvas.style.cursor = pick(e.clientX, e.clientY) || (cockpitLayout() && cockpit.keyAt(e.clientX, e.clientY)) ? 'pointer' : 'grab';
     return;
   }
   const dx = e.clientX - pointer.x, dy = e.clientY - pointer.y;
@@ -1749,6 +1840,7 @@ canvas.addEventListener('pointermove', (e) => {
   canvas.style.cursor = 'grabbing';
 });
 canvas.addEventListener('pointerup', (e) => {
+  if (pointer.skip) { pointer.skip = false; return; }
   pointer.down = false;
   canvas.releasePointerCapture?.(e.pointerId);
   canvas.style.cursor = 'grab';
@@ -1764,6 +1856,7 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 function pick(x, y) {
+  if (cockpitLayout() && y > glassPx) return null;
   raycaster.setFromCamera(new THREE.Vector2((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1), camera);
   const hit = raycaster.intersectObjects(pickables, false)[0];
   return hit?.object.userData.bodyId || null;
@@ -1826,6 +1919,12 @@ function frame() {
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
   composer.render();
+  if (ready && cockpitLayout()) {
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(cockpit.scene, cockpit.camera);
+    renderer.autoClear = true;
+  }
 }
 frame();
 
@@ -1834,6 +1933,7 @@ window.addEventListener('resize', () => {
   camera.aspect = w / h;
   renderer.setSize(w, h);
   composer.setSize(w, h);
+  cockpit.resize(w, h);
   computeViewOffset();
 });
 

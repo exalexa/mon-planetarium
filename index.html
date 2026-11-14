@@ -10,7 +10,7 @@
     <title>Axel Mannu Corrieras · Sys-E139</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=VT323&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
   </head>
   <body>
     <canvas id="bg"></canvas>
@@ -36,39 +36,20 @@
       <button type="button" data-mode="free" title="Pilotez vous-même, vue à la troisième personne (touche M)">Vol libre</button>
     </div>
 
-    <!-- Cockpit (mode pilote automatique) : verrière en haut, console en bas avec ses écrans -->
-    <div id="cockpit" aria-hidden="true">
-      <svg class="cockpit-frame" viewBox="0 0 1600 620" preserveAspectRatio="none">
+    <!-- Cockpit (mode pilote automatique) : le poste de pilotage est rendu en 3D ;
+         le texte orangé est projeté sur la verrière -->
+    <div id="glass-hud" aria-hidden="true">
+      <div class="glass-sheen"></div>
+      <svg class="glass-arcs" viewBox="0 0 1600 620" preserveAspectRatio="xMidYMin meet">
         <defs>
-          <linearGradient id="ck-metal" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#3a2f27" /><stop offset="0.6" stop-color="#241c17" /><stop offset="1" stop-color="#1a130e" />
-          </linearGradient>
+          <path id="arc-top" d="M 200 270 A 660 330 0 0 1 1400 270" />
+          <path id="arc-bot" d="M 200 540 A 1100 160 0 0 0 1400 540" />
         </defs>
-        <path fill="url(#ck-metal)" fill-rule="evenodd" d="M0 0H1600V620H0Z M140 64 C 520 14, 1080 14, 1460 64 C 1540 220, 1545 430, 1490 596 C 1060 610, 540 610, 110 596 C 55 430, 60 220, 140 64 Z" />
-        <path d="M140 64 C 340 220, 380 440, 330 604" stroke="#2b221b" stroke-width="14" fill="none" />
-        <path d="M1460 64 C 1260 220, 1220 440, 1270 604" stroke="#2b221b" stroke-width="14" fill="none" />
-        <path d="M140 64 C 520 14, 1080 14, 1460 64 C 1540 220, 1545 430, 1490 596 C 1060 610, 540 610, 110 596 C 55 430, 60 220, 140 64 Z" stroke="#c98a4a" stroke-opacity="0.35" stroke-width="3" fill="none" />
-        <g fill="#8a6a4a" opacity="0.7">
-          <circle cx="300" cy="40" r="5" /><circle cx="560" cy="27" r="5" /><circle cx="800" cy="23" r="5" /><circle cx="1040" cy="27" r="5" /><circle cx="1300" cy="40" r="5" />
-          <circle cx="86" cy="260" r="5" /><circle cx="82" cy="430" r="5" /><circle cx="1514" cy="260" r="5" /><circle cx="1518" cy="430" r="5" />
-        </g>
+        <g id="arc-ticks" stroke="#ff9a3c" stroke-width="2" opacity="0.45"></g>
+        <text font-size="26" letter-spacing="3"><textPath href="#arc-top" startOffset="50%" text-anchor="middle" id="arc-top-text"></textPath></text>
+        <text font-size="22" letter-spacing="3"><textPath href="#arc-bot" startOffset="50%" text-anchor="middle" id="arc-bot-text"></textPath></text>
       </svg>
-      <div class="console">
-        <div class="console-trim"></div>
-        <div class="console-slot left"><span>Fiche</span></div>
-        <div class="console-slot right"><span>Journal de bord</span></div>
-      </div>
-      <div class="dash">
-        <div class="dash-gauge"><div class="gauge-needle" id="dash-needle"></div><span>Poussée</span></div>
-        <div class="dash-screen">
-          <div class="dash-row"><span>Cible</span><b id="dash-target">LEXA</b></div>
-          <div class="dash-row"><span>Phase</span><b id="dash-status">En orbite</b></div>
-          <div class="dash-row"><span>Distance</span><b id="dash-dist">–</b></div>
-          <div class="dash-row"><span>Vitesse</span><b id="dash-speed">–</b></div>
-          <div class="dash-row"><span>Héliocentre</span><b id="dash-helio">–</b></div>
-        </div>
-        <div class="dash-gauge"><div class="gauge-needle" id="dash-needle2"></div><span>Vent solaire</span></div>
-      </div>
+      <div id="reticle"><span id="reticle-label"></span></div>
     </div>
 
     <!-- Vol libre : repère de cible, proximité, aide et commandes tactiles -->

@@ -1,14 +1,113 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/mon-planetarium/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/mon-planetarium/favicon.svg" />
+    <link rel="apple-touch-icon" href="/mon-planetarium/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Portfolio</title>
-    <script type="module" crossorigin src="/mon-planetarium/assets/index-D4sqFgbV.js"></script>
-    <link rel="stylesheet" crossorigin href="/mon-planetarium/assets/index-CGCKTkVD.css">
+    <meta name="description" content="Portfolio d'Axel Mannu Corrieras : physique, ingénierie et arts, à explorer comme un petit système solaire." />
+    <meta name="theme-color" content="#05060c" />
+    <title>Axel Mannu Corrieras · Sys-E139</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=VT323&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="/mon-planetarium/assets/index--5VB2xH9.js"></script>
+    <link rel="stylesheet" crossorigin href="/mon-planetarium/assets/index-DEmBOmYV.css">
   </head>
   <body>
     <canvas id="bg"></canvas>
+
+    <!-- Écran de chargement : réveil au coin du feu -->
+    <div id="loader" aria-live="polite">
+      <div class="ember"></div>
+      <p class="loader-title">Réveil…</p>
+      <div class="loader-bar"><span id="loader-progress"></span></div>
+      <p class="loader-hint" id="loader-percent">0 %</p>
+    </div>
+
+    <h1 id="planetarium-title">Sys-E139</h1>
+
+    <div id="loop-timer" title="Le soleil est stable. Pour l'instant.">
+      <span class="loop-sun"></span><span class="loop-label">Boucle</span><span id="loop-time">22:00</span>
+    </div>
+    <div id="space-weather" aria-live="polite"><span class="sw-dot"></span><span id="sw-text">Vent solaire calme</span></div>
+
+    <!-- Choix du mode de pilotage -->
+    <div id="mode-switch" role="group" aria-label="Mode de pilotage">
+      <button type="button" data-mode="auto" class="active" title="Le vaisseau vous emmène ; vue depuis le cockpit (touche M)">Pilote auto</button>
+      <button type="button" data-mode="free" title="Pilotez vous-même, vue à la troisième personne (touche M)">Vol libre</button>
+    </div>
+
+    <!-- Cockpit (mode pilote automatique) : le poste de pilotage est rendu en 3D ;
+         le texte orangé est projeté sur la verrière -->
+    <div id="glass-hud" aria-hidden="true">
+      <div class="glass-sheen"></div>
+      <svg class="glass-arcs" viewBox="0 0 1600 620" preserveAspectRatio="xMidYMin meet">
+        <defs>
+          <path id="arc-top" d="M 330 250 A 560 300 0 0 1 1270 250" />
+          <path id="arc-bot" d="M 380 520 A 620 160 0 0 0 1220 520" />
+        </defs>
+        <g id="arc-ticks" stroke="#ff9a3c" stroke-width="2" opacity="0.45"></g>
+        <text font-size="28" letter-spacing="3"><textPath href="#arc-top" startOffset="50%" text-anchor="middle" id="arc-top-text"></textPath></text>
+        <text font-size="24" letter-spacing="3"><textPath href="#arc-bot" startOffset="50%" text-anchor="middle" id="arc-bot-text"></textPath></text>
+      </svg>
+      <div id="reticle"><span id="reticle-label"></span></div>
+    </div>
+
+    <!-- Vol libre : repère de cible, proximité, aide et commandes tactiles -->
+    <div id="free-hud" aria-live="polite">
+      <div id="target-marker"><span class="tm-ring"></span><span class="tm-label" id="tm-label"></span></div>
+      <div id="near-label"></div>
+      <div id="free-speed"></div>
+      <div id="free-hint"></div>
+      <div id="free-help">
+        <b>Vol libre</b>
+        <span><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> : avancer, reculer, aller à gauche / à droite</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> tangage · <kbd>←</kbd><kbd>→</kbd> lacet</span>
+        <span><kbd>Ctrl</kbd> + <kbd>←</kbd><kbd>→</kbd> roulis · <kbd>Ctrl</kbd> + <kbd>↑</kbd><kbd>↓</kbd> monter / descendre</span>
+        <span><kbd>Maj</kbd> propulsion rapide · <kbd>E</kbd> sortir le véhicule une fois posé</span>
+        <span>Glisser : regarder autour · molette : recul de la caméra</span>
+        <span>Cliquer un astre ou le journal : le désigner comme cible</span>
+      </div>
+      <div id="flight-pad">
+        <button type="button" data-key="up" aria-label="Monter">⇡</button>
+        <button type="button" data-key="fwd" aria-label="Avancer">▲</button>
+        <button type="button" data-key="down" aria-label="Descendre">⇣</button>
+        <button type="button" data-key="left" aria-label="Gauche">◀</button>
+        <button type="button" data-key="back" aria-label="Reculer">▼</button>
+        <button type="button" data-key="right" aria-label="Droite">▶</button>
+        <button type="button" data-key="boost" aria-label="Propulsion rapide">⇧</button>
+        <button type="button" data-key="action" class="wide" aria-label="Véhicule">Véhicule (E)</button>
+      </div>
+    </div>
+
+    <aside id="astro-info-container" aria-live="polite">
+      <div class="panel-body"></div>
+    </aside>
+
+    <nav id="hud-nav" aria-label="Navigation entre les astres">
+      <button type="button" data-nav="up" title="Astre précédent (↑)" aria-label="Astre précédent">▲</button>
+      <button type="button" data-nav="left" title="Satellite précédent (←)" aria-label="Satellite précédent">◀</button>
+      <div id="hud-location">
+        <span id="hud-path">LEXA</span>
+        <span id="hud-section">Accueil</span>
+      </div>
+      <button type="button" data-nav="right" title="Satellite suivant (→)" aria-label="Satellite suivant">▶</button>
+      <button type="button" data-nav="down" title="Astre suivant (↓)" aria-label="Astre suivant">▼</button>
+    </nav>
+
+    <div id="project-overlay" role="dialog" aria-modal="true"></div>
+    <div id="flash"></div>
+
+    <!-- Vue dans l'oculaire de la grande lunette -->
+    <div id="eyepiece" aria-hidden="true">
+      <div class="eyepiece-ring"></div>
+      <div class="eyepiece-info">
+        <span>Grande lunette · Meudon</span>
+        <span>ω Centauri · α 13h 26m 47s · δ −47° 28′ 46″</span>
+        <span class="eyepiece-track">Suivi sidéral actif</span>
+      </div>
+    </div>
+
   </body>
 </html>
