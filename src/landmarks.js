@@ -88,10 +88,12 @@ function textPlane(text, w, h, { color = '#2b2118', bg = null, weight = 800 } = 
 // Bande sphérique (route, pelouse en anneau…) entre deux distances au pôle, collée à la sphère
 function sphereBand(R, r1, r2, color, lift = 0.006, seg = 72) {
   const t1 = Math.asin(Math.min(1, r1 / R)), t2 = Math.asin(Math.min(1, r2 / R));
-  return new THREE.Mesh(
+  const m = new THREE.Mesh(
     new THREE.SphereGeometry(R + lift, seg, 2, 0, Math.PI * 2, t1, t2 - t1),
     new THREE.MeshStandardMaterial({ color, roughness: 1 })
   );
+  m.userData.terrain = true;
+  return m;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +159,9 @@ function createMoon({ radius, seed, colors, cap = 0.62 }) {
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(cols, 3));
   geometry.computeVertexNormals();
-  return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+  const m = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+  m.userData.terrain = true;
+  return m;
 }
 
 // Assemble lune + pelouse + monument drapé + quelques rochers et arbres épars
@@ -179,6 +183,7 @@ export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, gro
     }
   }
   lawn.geometry.computeVertexNormals();
+  lawn.userData.terrain = true;
   moon.add(lawn);
   const lm = landmark(radius);
   drape(lm, radius);
@@ -474,6 +479,7 @@ export function amuMarseille(R) {
   sea.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0.8, -0.35, 0.5).normalize());
   sea.userData.noDrape = true;
   sea.userData.water = true;
+  sea.userData.terrain = true;
   g.add(sea);
   return g;
 }

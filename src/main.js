@@ -438,8 +438,24 @@ function buildSystem(gltf) {
     scene.add(c.line);
   });
 
+  // Sol praticable : surfaces des planètes (hors arbres, fusée…), le reste est obstacle
+  for (const b of BODIES) {
+    if (!b.glb || !b.obj || b.kind === 'star') continue;
+    b.obj.traverse((o) => {
+      if (!o.isMesh) return;
+      let inRocket = false, leaf = false;
+      for (let q = o; q && q !== b.obj; q = q.parent) { if (q.name === 'Rocket') inRocket = true; if (/Feuille/.test(q.name)) leaf = true; }
+      o.userData.terrain = !inRocket && !leaf;
+    });
+  }
+
   placeBodies(0);
   for (const b of BODIES) if (b.obj && !b.sky) measure(b);
+  // Base de lancement : position de la fusée dans le repère de PROXION
+  if (rocket && byId.proxion?.obj) {
+    byId.proxion.obj.updateMatrixWorld(true);
+    byId.proxion.launchLocal = byId.proxion.obj.worldToLocal(rocket.getWorldPosition(new THREE.Vector3()));
+  }
   byId.lexa.viewRadius = SUN_RADIUS;
   ready = true;
 }
@@ -763,11 +779,13 @@ function startTransition(target, prev = null) {
     const gT = groupOf(target), gP = prev ? groupOf(prev) : null;
     const hub = gP === gT && gT.kind === 'planet' && (prev !== gT || target !== gT) ? gT : null;
     const startOffset = dep ? fromP.clone().sub(bodyCenter(dep)) : null;
+    // Départ posé au sol (base de lancement) : montée presque verticale avant de s'incliner
+    const fromSurface = !!(dep && startOffset.length() < bodyRadius(dep) * 1.4);
     trail.userData.n = 0;
     trans = {
-      kind: 'transfer', from: fromP, dep, hub, startOffset, rDep: startOffset ? startOffset.length() : 0,
+      kind: 'transfer', from: fromP, dep, hub, startOffset, rDep: startOffset ? startOffset.length() : 0, fromSurface,
       t: 0, d: dist,
-      fA: dep ? 0.2 : 0.06, fC: 0.24, thA: 0.9, thC: 1.2,
+      fA: fromSurface ? 0.26 : dep ? 0.2 : 0.06, fC: 0.24, thA: fromSurface ? 0.35 : 0.9, thC: 1.2,
       fovFrom: camera.userData.baseFov ?? 50,
       qFrom: camera.quaternion.clone(),
       dur: THREE.MathUtils.clamp(3.2 + dist / 260, 3.5, 9.5),
@@ -807,8 +825,8 @@ function transferPos(tr, t, f) {
   const aPoint = (u) => {
     if (!tr.dep) return tr.from.clone();
     const off = tr.startOffset.clone().applyAxisAngle(UP, tr.thA * u);
-    off.setLength(tr.rDep * (1 + 1.3 * u));
-    off.y += tr.rDep * 0.35 * u;
+    off.setLength(tr.rDep * (1 + (tr.fromSurface ? 4 : 1.3) * u));
+    off.y += tr.rDep * (tr.fromSurface ? 0.1 : 0.35) * u;
     return depC.clone().add(off);
   };
   const tgtC = current.isLandmark ? f.look.clone() : bodyCenter(current);
@@ -845,7 +863,7 @@ function transferPhase(tr) {
   if (!tr) return null;
   if (tr.kind !== 'transfer') return 'En route';
   const fB = 1 - tr.fA - tr.fC;
-  if (tr.t < tr.fA) return 'Désorbitage';
+  if (tr.t < tr.fA) return tr.fromSurface ? (tr.t < tr.fA * 0.5 ? 'Décollage' : 'Mise en orbite basse') : 'Désorbitage';
   if (tr.t < tr.fA + fB * 0.35) return 'Accélération';
   if (tr.t < tr.fA + fB * 0.7) return 'Croisière';
   if (tr.t < tr.fA + fB) return 'Freinage';
@@ -1057,18 +1075,64 @@ function findNear(p) {
   }
   return best;
 }
+// Base de lancement : à côté de la fusée de PROXION
+function launchSite() {
+  const b = byId.proxion;
+  if (!b?.obj || !b.launchLocal) return null;
+  const c = bodyCenter(b);
+  const rocketW = b.obj.localToWorld(b.launchLocal.clone());
+  const n = rocketW.clone().sub(c).normalize();
+  // Un peu à l'écart de la tour de lancement
+  const side = new THREE.Vector3(0, 1, 0).cross(n);
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.normalize();
+  const dir = n.clone().addScaledVector(side, 0.32).normalize();
+  const probe = c.clone().addScaledVector(dir, bodyRadius(b) * 2);
+  const hit = groundHit(b, probe, true);
+  const up = hit ? hit.radial.clone() : dir;
+  return { body: b, point: hit ? hit.point : c.clone().addScaledVector(dir, bodyRadius(b)), up, toRocket: rocketW.clone().sub(hit ? hit.point : c).normalize() };
+}
+// Pose le vaisseau sur la base (vol libre) et place la caméra derrière
+function placeShipAtBase() {
+  const L = launchSite();
+  if (!L) return false;
+  enterFree();
+  const foot = 0.9 * free.shipScale;
+  const pos = L.point.clone().addScaledVector(L.up, foot);
+  const f = L.toRocket.clone().addScaledVector(L.up, -L.toRocket.dot(L.up)).normalize();
+  mTmp.makeBasis(L.up.clone().cross(f).normalize(), L.up, f);
+  ship.quaternion.setFromRotationMatrix(mTmp);
+  const inv = L.body.obj.matrixWorld.clone().invert();
+  free.landed = { body: L.body, local: L.body.obj.worldToLocal(pos.clone()), localUp: L.up.clone().transformDirection(inv) };
+  free.anchor = L.body;
+  free.pos.copy(pos);
+  free.offset.copy(pos).sub(bodyCenter(L.body));
+  ship.position.copy(pos);
+  free.camPos.copy(pos).addScaledVector(f, -6).addScaledVector(L.up, 3);
+  hint('Base de lancement de PROXION · Espace pour décoller', 7);
+  return true;
+}
+
 // Sol sous un point : rayon lancé vers le centre de l'astre, contre ses vrais maillages (relief, bâtiments)
 const groundRay = new THREE.Raycaster();
 function groundMeshes(b) {
   if (!b.groundMeshes) b.groundMeshes = pickables.filter((o) => o.userData.bodyId === b.id || (byId[o.userData.bodyId]?.attached && byId[o.userData.bodyId].parent === b));
   return b.groundMeshes;
 }
-function groundHit(b, p) {
+function terrainMeshes(b) {
+  if (!b.terrainMeshes) {
+    const t = groundMeshes(b).filter((o) => o.userData.terrain);
+    b.terrainMeshes = t.length ? t : groundMeshes(b);
+    b.obstacleMeshes = t.length ? groundMeshes(b).filter((o) => !o.userData.terrain) : [];
+  }
+  return b.terrainMeshes;
+}
+function groundHit(b, p, terrainOnly = false) {
   const c = bodyCenter(b);
   const n = p.clone().sub(c).normalize();
   groundRay.set(p.clone().addScaledVector(n, bodyRadius(b) * 0.4), n.clone().negate());
   groundRay.far = bodyRadius(b) * 3;
-  const hit = groundRay.intersectObjects(groundMeshes(b), false)[0];
+  const hit = groundRay.intersectObjects(terrainOnly ? terrainMeshes(b) : groundMeshes(b), false)[0];
   if (!hit) return null;
   const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : n.clone();
   if (normal.dot(n) < 0) normal.negate();
@@ -1344,12 +1408,38 @@ function updateRover(dt) {
   r.speed = THREE.MathUtils.clamp(r.speed, -vmax * 0.5, vmax);
   const grip = Math.min(1, Math.abs(r.speed) / (vmax * 0.25) + 0.25);
   fwd.applyAxisAngle(up, steer * 1.7 * dt * grip * (r.speed < 0 ? -1 : 1));
-  pos.addScaledVector(fwd, r.speed * dt);
-  // Suivi du sol
-  const hit = groundHit(b, pos);
+  const prev = pos.clone();
+  const step = r.speed * dt;
+  // Obstacles (bâtiments, arbres, fusée) : on regarde devant les roues avant d'avancer
+  terrainMeshes(b);
+  let blocked = false;
+  if (Math.abs(step) > 1e-6 && b.obstacleMeshes.length) {
+    const dir = fwd.clone().multiplyScalar(Math.sign(step));
+    groundRay.set(pos.clone().addScaledVector(up, r.scale * 0.3), dir);
+    groundRay.far = Math.abs(step) + r.scale * 0.65;
+    if (groundRay.intersectObjects(b.obstacleMeshes, false).length) blocked = true;
+  }
+  if (!blocked) pos.addScaledVector(fwd, step);
+  // Suivi du sol : uniquement le terrain, jamais les toits ni les murs
+  let hit = groundHit(b, pos, true);
+  if (hit && !blocked) {
+    // Pente trop forte (plus de 40°) ou marche trop haute : le véhicule ne passe pas
+    const slope = hit.normal.dot(hit.radial);
+    const rise = hit.point.distanceTo(c) - prev.distanceTo(c);
+    if (slope < Math.cos(THREE.MathUtils.degToRad(40)) || rise > Math.max(Math.abs(step) * 0.85, r.scale * 0.12)) {
+      blocked = true;
+      pos.copy(prev);
+      hit = groundHit(b, pos, true);
+    }
+  }
+  if (blocked) {
+    r.speed *= -0.25;
+    if (hintTimer <= 0) hint('Le véhicule ne peut pas franchir cet obstacle', 1.5);
+  }
   let water = false;
   if (hit) {
-    up = hit.radial.clone().lerp(hit.normal, 0.55).normalize();
+    // Collé à la surface : l'assiette suit le sol mais reste proche de la verticale locale
+    up = hit.radial.clone().lerp(hit.normal, 0.35).normalize();
     pos.copy(hit.point);
     water = hit.water;
     if (water) pos.addScaledVector(hit.radial, r.scale * (0.12 + Math.sin(simTime * 3) * 0.03));
@@ -1457,12 +1547,24 @@ function goTo(id, force = false) {
   current = b;
   user.tYaw = user.tPitch = 0;
   user.tZoom = 1;
+  let from = first ? null : prev;
   if (first) {
-    camera.position.copy(frameFor(b).pos).add(new THREE.Vector3(0, 900, 1400));
-    look.set(0, 0, 0);
-    camera.lookAt(look);
+    // Premier trajet : on décolle de la base de lancement de PROXION
+    const L = launchSite();
+    if (L && b !== byId.proxion) {
+      camera.position.copy(L.point).addScaledVector(L.up, 0.5);
+      const f = L.toRocket.clone().addScaledVector(L.up, -L.toRocket.dot(L.up)).normalize();
+      camera.up.copy(L.up);
+      camera.lookAt(camera.position.clone().add(f).addScaledVector(L.up, 0.6));
+      camera.up.set(0, 1, 0);
+      from = byId.proxion;
+    } else {
+      camera.position.copy(frameFor(b).pos).add(new THREE.Vector3(0, 900, 1400));
+      look.set(0, 0, 0);
+      camera.lookAt(look);
+    }
   }
-  startTransition(b, first ? null : prev);
+  startTransition(b, from);
   explored.add(b.id);
   saveExplored();
   updateTree();
@@ -1744,8 +1846,12 @@ function onModelLoaded(gltf) {
     setTimeout(() => ui.loader.remove(), 1400);
     [ui.nav, ui.timer, tree, document.getElementById('space-weather'), document.getElementById('mode-switch')].forEach((el) => el.classList.add('visible'));
     const start = location.hash.slice(1);
-    // On démarre toujours en pilote automatique ; le vol libre reprend à la fin du premier trajet
-    pendingFree = mode === 'free';
+    if (mode === 'free') {
+      // Vol libre : le vaisseau attend sur la base de lancement de PROXION
+      setMode('free', true);
+      current = byId.proxion;
+      if (placeShipAtBase()) { showBody(byId.proxion); return; }
+    }
     mode = 'auto';
     setMode('auto', true);
     goTo(byId[start] ? start : 'lexa');

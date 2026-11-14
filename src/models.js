@@ -158,6 +158,7 @@ export function createPlanet({ radius, seed = 1, detail = 5, amp = 0.07, freq = 
     geometry,
     new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 })
   );
+  surface.userData.terrain = true;
   group.add(surface);
   const rnd = mulberry32(seed * 1000);
   for (let i = 0; i < trees; i++) {
@@ -299,6 +300,7 @@ export function ricochetMoon(radius = 2.8) {
   const water = new THREE.MeshStandardMaterial({ color: 0x1f6f9a, roughness: 0.18, metalness: 0.1, emissive: 0x062033, emissiveIntensity: 0.5 });
   const sea = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 5), water);
   sea.userData.water = true;
+  sea.userData.terrain = true;
   g.add(sea);
   // Petit îlot
   const isle = new THREE.Group();
