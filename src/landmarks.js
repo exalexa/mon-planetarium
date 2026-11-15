@@ -8,6 +8,7 @@ import {
   grandPiano, glenoidImplant,
 } from './models.js';
 import { Kit, kitOf, hollow, faceBands, facadeWindows, M } from './kit.js';
+import { Sampler } from './sampler.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -119,55 +120,97 @@ function sphereBand(R, r1, r2, color, lift = 0.006, seg = 72) {
 // ---------------------------------------------------------------------------
 const tmpBox = new THREE.Box3();
 const plinthMat = mat(0x9d927f);
-function drape(group, R) {
+// Pose des bâtiments sur la lune. Chaque bâtiment est construit à plat ; il est posé sur un socle dont
+// le dessus est plan (tangent à la surface au centre de l'emprise, pour que le bâtiment soit d'aplomb)
+// et dont le dessous épouse le relief réel. Le dessus est calé sur le point le plus haut du terrain
+// sous l'emprise : rien n'est enterré, et le socle ne dépasse que de la courbure et des creux du sol.
+const SOCLE = 0x9d927f;
+function drape(group, R, smp = null) {
+  const q = {}, d = new THREE.Vector3(), P = new THREE.Vector3(), off = new THREE.Vector3();
+  // Hauteur du terrain le long de la verticale n (distance au centre projetée sur n)
+  const heightAt = (n, Q, u, v, base) => {
+    off.set(u, 0, v).applyQuaternion(Q);
+    d.copy(n).multiplyScalar(base).add(off).normalize();
+    if (!smp) return R;
+    smp.query(d, q);
+    if (!(q.r > 0)) return R;
+    return P.copy(d).multiplyScalar(q.r).dot(n);
+  };
   for (const c of [...group.children]) {
     if (c.userData.noDrape) continue;
     // Les bâtiments du kit sont assemblés avant de mesurer leur emprise
     if (c.userData.kit) { c.userData.kit.build(c); delete c.userData.kit; }
     const { x, z } = c.position;
     const y0 = c.position.y;
-    if (c.userData.plinth) {
-      // Fondations : on mesure l'emprise dans le repère du bâtiment
+    const n = c.userData.dir ? c.userData.dir.clone() : new THREE.Vector3(x, Math.sqrt(Math.max(R * R - x * x - z * z, 0.01)), z).normalize();
+    const qBase = c.userData.quat || new THREE.Quaternion().setFromUnitVectors(UP, n);
+    const Q = qBase.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, c.rotation.y));
+    const explicit = c.userData.lift !== undefined;
+    let top;
+    if (explicit) {
+      // Niveau imposé (terrasse de Meudon) : on garde la cote prévue
+      top = R + c.userData.lift - 0.004;
+    } else if (c.userData.plinth) {
+      // Emprise dans le repère du bâtiment
       const rot = c.rotation.y;
       c.position.set(0, 0, 0); c.rotation.set(0, 0, 0);
       c.updateMatrixWorld(true);
       tmpBox.setFromObject(c);
       c.rotation.y = rot;
-      const hx = Math.max(Math.abs(tmpBox.min.x), Math.abs(tmpBox.max.x));
-      const hz = Math.max(Math.abs(tmpBox.min.z), Math.abs(tmpBox.max.z));
-      const sag = (hx * hx + hz * hz) / (2 * R) + 0.1;
-      const x0 = tmpBox.min.x - 0.03, x1 = tmpBox.max.x + 0.03, z0 = tmpBox.min.z - 0.03, z1 = tmpBox.max.z + 0.03;
-      const k = new Kit();
-      // Socle praticable : son dessus prolonge le sol des bâtiments, ses flancs plongent dans la lune
-      k.box(x1 - x0, sag + 0.01, z1 - z0, (x0 + x1) / 2, -sag, (z0 + z1) / 2, 0x9d927f);
-      // Perrons : marches qui descendent de chaque porte jusqu'au sol
-      for (const d of c.userData.doors || []) {
-        if (Math.abs(d.y) > 1e-3) continue;
-        const ox = d.x + d.nx * 0.03, oz = d.z + d.nz * 0.03;
-        // Sol de la lune sous le plan tangent du bâtiment : y ≈ 0,007 − ρ² / 2R
-        const ex = ox + d.nx * M(1.5), ez = oz + d.nz * M(1.5);
-        const drop = 0.003 + (ex * ex + ez * ez) / (2 * R);
-        const rise = M(0.18), run = M(0.32);
-        const n = Math.ceil(drop / rise);
-        if (n <= 1) continue;
-        for (let i = 0; i < n; i++) {
-          const top = 0.01 - ((i + 1) * drop) / n;
-          const e = i * run + run / 2;
-          const sx = ox + d.nx * e, sz = oz + d.nz * e;
-          const ww = d.w + M(1.2);
-          if (d.nx) k.box(run, 0.12, ww, sx, top - 0.12, sz, 0xb8ad98);
-          else k.box(ww, 0.12, run, sx, top - 0.12, sz, 0xb8ad98);
+      const x0 = tmpBox.min.x - 0.025, x1 = tmpBox.max.x + 0.025, z0 = tmpBox.min.z - 0.025, z1 = tmpBox.max.z + 0.025;
+      const nx = THREE.MathUtils.clamp(Math.ceil((x1 - x0) / 0.06), 2, 28), nz = THREE.MathUtils.clamp(Math.ceil((z1 - z0) / 0.06), 2, 28);
+      const H = [];
+      for (let i = 0; i <= nx; i++) { H[i] = []; for (let j = 0; j <= nz; j++) H[i][j] = heightAt(n, Q, x0 + ((x1 - x0) * i) / nx, z0 + ((z1 - z0) * j) / nz, R); }
+      top = Math.max(...H.flat()) + 0.003;
+      const k = new Kit(), e = 0.03;
+      const bot = (h) => h - top - 0.04;
+      // Dessus plan (praticable), puis pourtour : colonnes dont le pied suit le terrain
+      k.box(x1 - x0, 0.012, z1 - z0, (x0 + x1) / 2, -0.012, (z0 + z1) / 2, SOCLE, { collide: false });
+      const lowest = bot(Math.min(...H.flat()));
+      k.solid(x0, Math.max(lowest, -0.6), z0, x1, 0, z1);
+      for (let i = 0; i < nx; i++) {
+        const xa = x0 + ((x1 - x0) * i) / nx, xb = x0 + ((x1 - x0) * (i + 1)) / nx;
+        for (const [j, zc] of [[0, z0 + e / 2], [nz, z1 - e / 2]]) {
+          const b0 = bot(Math.min(H[i][j], H[i + 1][j]));
+          if (b0 < -0.001) k.box(xb - xa + 0.002, -b0, e, (xa + xb) / 2, b0, zc, SOCLE, { collide: false });
+        }
+      }
+      for (let j = 0; j < nz; j++) {
+        const za = z0 + ((z1 - z0) * j) / nz, zb = z0 + ((z1 - z0) * (j + 1)) / nz;
+        for (const [i, xc] of [[0, x0 + e / 2], [nx, x1 - e / 2]]) {
+          const b0 = bot(Math.min(H[i][j], H[i][j + 1]));
+          if (b0 < -0.001) k.box(e, -b0, zb - za + 0.002, xc, b0, (za + zb) / 2, SOCLE, { collide: false });
+        }
+      }
+      // Bandeau de couronnement du socle
+      for (const [w, dd, xx, zz] of [[x1 - x0 + 0.01, 0.012, (x0 + x1) / 2, z0], [x1 - x0 + 0.01, 0.012, (x0 + x1) / 2, z1], [0.012, z1 - z0, x0, (z0 + z1) / 2], [0.012, z1 - z0, x1, (z0 + z1) / 2]]) k.box(w, 0.01, dd, xx, -0.012, zz, 0xb8ad98, { collide: false });
+      // Perrons : marches qui descendent de chaque porte jusqu'au terrain réel
+      for (const dr of c.userData.doors || []) {
+        if (Math.abs(dr.y) > 1e-3) continue;
+        const ox = dr.nx ? (dr.nx > 0 ? x1 : x0) : dr.x, oz = dr.nz ? (dr.nz > 0 ? z1 : z0) : dr.z;
+        const rise = M(0.17), run = M(0.3);
+        let drop = top - heightAt(n, Q, ox + dr.nx * M(1.2), oz + dr.nz * M(1.2), R) + 0.002;
+        const nSt = Math.min(40, Math.ceil(drop / rise));
+        if (nSt < 1) continue;
+        // On recalcule la chute au pied de l'escalier (il s'éloigne du bâtiment)
+        drop = top - heightAt(n, Q, ox + dr.nx * nSt * run, oz + dr.nz * nSt * run, R) + 0.004;
+        const n2 = Math.min(40, Math.max(1, Math.ceil(drop / rise)));
+        for (let i = 0; i < n2; i++) {
+          const tp = -((i + 1) * drop) / n2;
+          const ec = i * run + run / 2;
+          const sx = ox + dr.nx * ec, sz = oz + dr.nz * ec, ww = dr.w + M(1.2);
+          const hh = tp - (-drop - 0.05);
+          if (dr.nx) k.box(run, hh, ww, sx, -drop - 0.05, sz, 0xb8ad98);
+          else k.box(ww, hh, run, sx, -drop - 0.05, sz, 0xb8ad98);
         }
       }
       k.build(c);
+    } else {
+      // Objet sans socle (arbre, muret, mât) : posé sur le terrain au centre
+      top = heightAt(n, Q, 0, 0, R) - 0.002;
     }
-    // Position : soit à plat (x, z) près du pôle, soit une direction explicite (carte, bord de terrasse)
-    const n = c.userData.dir ? c.userData.dir.clone() : new THREE.Vector3(x, Math.sqrt(Math.max(R * R - x * x - z * z, 0.01)), z).normalize();
-    // Relief à deux niveaux (Meudon) : le bâtiment se pose sur le niveau de son terrain
-    const relief = group.userData.relief;
-    const lift = c.userData.lift ?? (relief ? relief(n) : 0);
-    c.position.copy(n).multiplyScalar(R + y0 + lift - 0.004);
-    c.quaternion.premultiply(c.userData.quat || new THREE.Quaternion().setFromUnitVectors(UP, n));
+    c.position.copy(n).multiplyScalar(top + y0);
+    c.quaternion.premultiply(qBase);
   }
   group.userData.afterDrape?.(group);
 }
@@ -177,7 +220,7 @@ const MOON_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, flatShadin
 MOON_MAT.userData.tex = 2; MOON_MAT.userData.texScale = 16;
 function createMoon({ radius, seed, colors, cap = 0.62, relief = null, flatten = null, ground = null, paint = null }) {
   // Relief à niveaux : maillage fin pour que les ruptures de pente suivent les murs
-  const geometry = new THREE.IcosahedronGeometry(radius, relief ? 44 : 5);
+  const geometry = new THREE.IcosahedronGeometry(radius, relief ? 36 : 5);
   const pos = geometry.attributes.position;
   const v = new THREE.Vector3();
   const rnd = mulberry32(seed * 77);
@@ -255,7 +298,10 @@ export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, gro
   lawn.userData.terrain = true;
   moon.add(lawn);
   }
-  drape(lm, radius);
+  // Le relief réel (bruit, cratères, vallées) sert à poser chaque bâtiment
+  moon.updateMatrixWorld(true);
+  const smp = new Sampler(moon, new THREE.Vector3(), (o) => o.userData.terrain);
+  drape(lm, radius, smp);
   moon.add(lm);
   moon.userData.topY = radius;
   moon.userData.cap = cap;

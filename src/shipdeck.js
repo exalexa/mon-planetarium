@@ -4,14 +4,15 @@ import * as THREE from 'three';
 import { Kit, hollow, M, U, plain } from './kit.js';
 
 // k : mètres par unité du modèle de vaisseau (le vaisseau posé mesure environ 14 m)
-export function buildInterior(k) {
+export function buildInterior(k, dims = null) {
   const g = new THREE.Group();
   const kit = new Kit();
-  const W = 0.72 * k, D = 0.8 * k, H = 2.5, FY = 0.6 * k;
+  // Cabine logée dans le fuselage : dimensions en mètres (largeur, longueur, hauteur du plancher)
+  const W = dims?.W ?? 0.72 * k, D = dims?.D ?? 0.8 * k, H = 2.5, FY = dims?.FY ?? 0.6 * k;
   const WOOD = 0x8a5a36, HULL = 0xe4dac4, MET = 0x8f969c, DARK = 0x2a2622, ORANGE = 0xe07a3a;
   const o = { collide: false };
   // Cabine : plancher de bois, parois claires, grande baie à l'avant, porte de soute à tribord
-  hollow(kit, { w: M(W), d: M(D), h: M(H), floors: 1, wall: HULL, inner: 0xeadfc8, floorCol: WOOD, ceil: 0xd9ceb6, doors: { '+x': M(-D * 0.18) }, open: ['+z'], doorW: M(2.3), doorH: M(2.05), furnish: 'none', lamps: true, seed: 5 });
+  hollow(kit, { w: M(W), d: M(D), h: M(H), floors: 1, wall: HULL, inner: 0xeadfc8, floorCol: WOOD, ceil: 0xd9ceb6, doors: { '+x': M(-D * 0.18) }, stair: 'none', open: ['+z'], doorW: M(2.3), doorH: M(2.05), furnish: 'none', lamps: true, seed: 5 });
   // Baie avant vitrée (allège pleine, montants, vitre)
   kit.box(M(W), M(0.85), M(0.12), 0, 0, M(D / 2 - 0.06), HULL);
   kit.solid(-M(W / 2), 0, M(D / 2 - 0.1), M(W / 2), M(H), M(D / 2));
@@ -35,6 +36,8 @@ export function buildInterior(k) {
   // Bandeau orange et lisses de bois, comme sur la coque
   kit.box(M(0.02), M(0.12), M(D - 0.1), -M(W / 2 - 0.03), M(1.2), 0, ORANGE, o);
   kit.box(M(W - 0.1), M(0.12), M(0.02), 0, M(1.2), -M(D / 2 - 0.03), ORANGE, o);
+  kit.build(g);
+  const cabin = [...g.children];
   // Rampe de soute à tribord : marches larges jusqu'au sol (et au-delà si le terrain descend)
   const rise = 0.2, run = 0.36, n = Math.ceil((FY + 1.6) / rise), dz = -D * 0.18;
   kit.box(M(0.5), M(0.12), M(2.5), M(W / 2 + 0.25), -M(0.12), M(dz), MET);
@@ -45,10 +48,10 @@ export function buildInterior(k) {
   for (const sz2 of [-1, 1]) kit.box(M(n * run), M(0.06), M(0.06), M(W / 2 + 0.5 + (n * run) / 2), -M((n * rise) / 2) + M(0.9), M(dz + sz2 * 1.18), ORANGE, { collide: false, rotZ: -Math.atan2(rise, run) });
   kit.build(g); plain(g);
   return {
-    group: g, W, D, H, FY, scale: 1 / U,
+    group: g, cabin, W, D, H, FY, scale: 1 / U,
     seat: new THREE.Vector3(0, 0, M(sz - 0.75)),                 // où l'on se tient pour reprendre les commandes
     spawn: new THREE.Vector3(M(0.5), M(0.05), M(sz - 0.9)),
-    bay: new THREE.Vector3(M(W / 2 - 1.15), 0, -M(D / 2 - 1.75)), // emplacement de l'amphibie
+    bay: new THREE.Vector3(M(W / 2 - 1.25), 0, -M(D / 2 - 1.85)), // emplacement de l'amphibie
     inside: (l) => Math.abs(l.x) < M(W / 2) && Math.abs(l.z) < M(D / 2) && l.y > -M(0.3) && l.y < M(H),
   };
 }
@@ -78,5 +81,17 @@ export function buildRover() {
   const dome = new THREE.Mesh(new THREE.SphereGeometry(0.62, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x9fd0ee, transparent: true, opacity: 0.35, roughness: 0.1 }));
   dome.position.set(0, 0.9, 0.2); dome.scale.set(1, 0.9, 1.1);
   g.add(dome);
+  return g;
+}
+
+// Amphibie d'après le modèle fourni : 3,2 m de long, posé sur ses roues, l'avant vers +z
+export function roverFromModel(model) {
+  const g = new THREE.Group();
+  const m = model.clone();
+  const box = new THREE.Box3().setFromObject(m), size = box.getSize(new THREE.Vector3());
+  const k = 3.2 / size.z;
+  m.scale.setScalar(k);
+  m.position.set(-((box.min.x + box.max.x) / 2) * k, -box.min.y * k, -((box.min.z + box.max.z) / 2) * k);
+  g.add(m);
   return g;
 }

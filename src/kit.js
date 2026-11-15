@@ -162,6 +162,7 @@ export function hollow(k, o) {
   const rnd = rng(seed);
   const X0 = x - w / 2 + t, X1 = x + w / 2 - t, Z0 = z - d / 2 + t, Z1 = z + d / 2 - t;
   const y0 = base;
+  const doorStart = k.doors.length;
   // Murs (avec portes)
   for (const side of ['+z', '-z', '+x', '-x']) {
     if (open.includes(side)) continue;
@@ -209,12 +210,24 @@ export function hollow(k, o) {
   const mode = flights <= 0 ? 'none'
     : stair !== 'spiral' && (X1 - X0) >= Lmax + M(2.6) && (Z1 - Z0) >= 2 * sw + M(2.2) ? 'straight' : 'spiral';
   const holes = [];
+  const path = [];
   let furnZ0 = Z0 + M(0.35);
   let yTop = y0 + h - topRoom;
+  let furnZ1 = Z1 - M(0.35);
+  const myDoors = k.doors.slice(doorStart);
   if (mode === 'straight') {
-    const zA = stairZ ?? Z0 + sw / 2;
-    const lanes = [zA, zA + sw + M(0.12)];
-    const xs = stairX ?? X1 - M(1.3) - Lmax;
+    // Les volées longent un mur long ; on choisit le côté et le bout qui ne bouchent aucune porte
+    const configs = [];
+    for (const side of [-1, 1]) for (const end of [1, -1]) {
+      const zA = side < 0 ? Z0 + sw / 2 : Z1 - sw / 2;
+      const xs = end > 0 ? X1 - M(1.3) - Lmax : X0 + M(1.3);
+      const blocked = myDoors.some((dd) => dd.nz === side && dd.x > xs - dd.w && dd.x < xs + Lmax + dd.w);
+      configs.push({ zA, xs, side, blocked });
+    }
+    const cfg = stairZ != null || stairX != null ? { zA: stairZ ?? Z0 + sw / 2, xs: stairX ?? X1 - M(1.3) - Lmax, side: -1 } : configs.find((c) => !c.blocked) || configs[0];
+    const zA = cfg.zA;
+    const lanes = [zA, zA - cfg.side * (sw + M(0.12))];
+    const xs = cfg.xs;
     for (let f = 0; f < flights; f++) {
       const yA = level(f), yB = level(f + 1);
       const n = Math.ceil((yB - yA) / rise0), r = (yB - yA) / n, L = n * run;
@@ -223,21 +236,24 @@ export function hollow(k, o) {
         const top = yA + (i + 1) * r;
         const xa = dir > 0 ? xs + i * run : xs + L - (i + 1) * run;
         k.box(run, top - yA, sw, xa + run / 2, yA, lane, i % 2 ? stairCol : 0x7d5234);
+        path.push([xa + run / 2, lane, top]);
       }
       holes[f + 1] = [xs, xs + L, lane - sw / 2 - M(0.05), lane + sw / 2 + M(0.05)];
       // Garde-corps le long de la trémie (les extrémités restent ouvertes)
       const hz = holes[f + 1];
       for (const zz of [hz[2], hz[3]]) {
-        if (zz <= Z0 + 0.002) continue;
+        if (zz <= Z0 + 0.002 || zz >= Z1 - 0.002) continue;
         k.box(L - 2 * run, M(1.0), M(0.08), xs + L / 2, yB, zz, DARKWOOD);
       }
     }
-    furnZ0 = lanes[1] + sw / 2 + M(0.7);
+    if (cfg.side < 0) furnZ0 = lanes[1] + sw / 2 + M(0.7);
+    else { furnZ0 = Z0 + M(0.35); furnZ1 = lanes[1] - sw / 2 - M(0.7); }
   } else if (mode === 'spiral') {
     // Escalier à noyau central (tours) : il tourne le long des murs jusqu'à la salle haute
     const lw = Math.min(sw, (Math.min(X1 - X0, Z1 - Z0)) / 3.2);
     const cx0 = X0 + lw, cx1 = X1 - lw, cz0 = Z0 + lw, cz1 = Z1 - lw;
-    yTop = Math.max(y0 + M(3), y0 + h - topRoom);
+    // Jusqu'au toit (plate-forme) ou jusqu'à la salle haute
+    yTop = toRoof ? y0 + h : Math.max(y0 + M(3), y0 + h - topRoom);
     k.box(cx1 - cx0, yTop - y0, cz1 - cz0, (cx0 + cx1) / 2, y0, (cz0 + cz1) / 2, inner ?? wall);
     const cells = [];
     const sideCells = (ax, a0, a1, b0, b1, dirSign) => {
@@ -249,28 +265,41 @@ export function hollow(k, o) {
     };
     let top = y0 + 0.012, guard = 0;
     const steps = [];
-    while (top < yTop - 1e-4 && guard++ < 400) {
-      cells.length = 0;
-      sideCells('x', cx0, cx1, Z0, cz0, 1); cells.push([cx1, X1, Z0, cz0]);
-      sideCells('z', cz0, cz1, cx1, X1, 1); cells.push([cx1, X1, cz1, Z1]);
-      sideCells('x', cx0, cx1, cz1, Z1, -1); cells.push([X0, cx0, cz1, Z1]);
-      sideCells('z', cz0, cz1, X0, cx0, -1); cells.push([X0, cx0, Z0, cz0]);
-      for (const c of cells) { if (top >= yTop - 1e-4) break; top = Math.min(yTop, top + rise0); steps.push([c, top]); }
+    sideCells('x', cx0, cx1, Z0, cz0, 1); cells.push([cx1, X1, Z0, cz0]);
+    sideCells('z', cz0, cz1, cx1, X1, 1); cells.push([cx1, X1, cz1, Z1]);
+    sideCells('x', cx0, cx1, cz1, Z1, -1); cells.push([X0, cx0, cz1, Z1]);
+    sideCells('z', cz0, cz1, X0, cx0, -1); cells.push([X0, cx0, Z0, cz0]);
+    // La montée commence juste après la porte : le palier d'entrée reste libre au rez-de-chaussée
+    const dd = myDoors[0];
+    if (dd) {
+      const px = dd.x - dd.nx * M(0.8), pz = dd.z - dd.nz * M(0.8);
+      let bi = 0, bd = Infinity;
+      cells.forEach((c, i) => { const dist = Math.hypot((c[0] + c[1]) / 2 - px, (c[2] + c[3]) / 2 - pz); if (dist < bd) { bd = dist; bi = i; } });
+      const rot = (bi + 2) % cells.length;
+      cells.push(...cells.splice(0, rot));
     }
+    let lastCell = 0;
+    while (top < yTop - 1e-4 && guard++ < 400) {
+      for (let ci = 0; ci < cells.length; ci++) { if (top >= yTop - 1e-4) break; top = Math.min(yTop, top + rise0); steps.push([cells[ci], top]); lastCell = ci; }
+    }
+    steps.forEach(([c, tp]) => path.push([(c[0] + c[1]) / 2, (c[2] + c[3]) / 2, tp]));
     steps.forEach(([c, tp], i) => {
       const bottom = Math.max(y0, tp - M(0.55));
       k.box(c[1] - c[0], tp - bottom, c[3] - c[2], (c[0] + c[1]) / 2, bottom, (c[2] + c[3]) / 2, i % 2 ? stairCol : 0x7d5234);
     });
     // Salle haute : plancher sur le noyau prolongé jusqu'aux murs, sauf la dernière volée
-    const last = steps.slice(-6).map(([c]) => c);
+    // Trémie : au-dessus de toutes les marches où la tête du marcheur atteindrait le plancher
+    const last = steps.filter(([, tp]) => tp > yTop - M(2.3)).map(([c]) => c);
     const lx0 = Math.min(...last.map((c) => c[0])), lx1 = Math.max(...last.map((c) => c[1]));
     const lz0 = Math.min(...last.map((c) => c[2])), lz1 = Math.max(...last.map((c) => c[3]));
     slabWithHole(k, X0, X1, Z0, Z1, yTop - slab, slab, [lx0, lx1, lz0, lz1], floorCol);
+    // Palier d'arrivée : on sort de la dernière marche de plain-pied
+    for (const j of [1, 2]) { const c = cells[(lastCell + j) % cells.length]; k.box(c[1] - c[0], slab, c[3] - c[2], (c[0] + c[1]) / 2, yTop - slab, (c[2] + c[3]) / 2, floorCol); }
     furnZ0 = null;
   }
   for (let f = 1; f < floors && mode === 'straight'; f++) slabWithHole(k, X0, X1, Z0, Z1, level(f) - slab, slab, holes[f], floorCol);
   if (toRoof && mode === 'straight') slabWithHole(k, X0, X1, Z0, Z1, y0 + h - slab, slab, holes[floors], ceil);
-  else if (roofSlab) k.box(X1 - X0, slab, Z1 - Z0, x, y0 + h - slab, z, ceil);
+  else if (roofSlab && !(toRoof && mode === 'spiral')) k.box(X1 - X0, slab, Z1 - Z0, x, y0 + h - slab, z, ceil);
   // Lampes au plafond de chaque niveau
   const levels = mode === 'spiral' ? [[y0, yTop], [yTop, y0 + h]] : Array.from({ length: floors }, (_, f) => [level(f), f === floors - 1 ? y0 + h : level(f + 1)]);
   if (lamps) {
@@ -288,13 +317,13 @@ export function hollow(k, o) {
       if (mode === 'spiral' && f === 0) return;
       const region = mode === 'spiral'
         ? [X0 + M(0.3), X1 - M(0.3), Z0 + M(0.3), Z1 - M(0.3)]
-        : [X0 + M(0.35), X1 - M(0.35), furnZ0, Z1 - M(0.35)];
+        : [X0 + M(0.35), X1 - M(0.35), furnZ0, furnZ1];
       if (region[1] - region[0] < M(1.5) || region[3] - region[2] < M(1.5)) return;
       const doorsHere = f === 0 ? k.doors.filter((dd) => Math.abs(dd.y - y0) < 1e-6) : [];
       FURNISH[furnish]?.(k, region, yl + (f === 0 ? 0.012 : 0), yc - yl, rnd, doorsHere, f, x, z);
     });
   }
-  return { X0, X1, Z0, Z1, level, levels, yTop, mode, holes };
+  return { X0, X1, Z0, Z1, level, levels, yTop, mode, holes, path };
 }
 
 function slabWithHole(k, X0, X1, Z0, Z1, y, th, hole, col) {

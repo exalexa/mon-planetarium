@@ -517,6 +517,8 @@ export function createShip() {
   add(g, new THREE.SphereGeometry(0.035, 6, 6), glow(0xff5a4a, 3), -0.62, 0, 0.1);
   add(g, new THREE.SphereGeometry(0.035, 6, 6), glow(0x5aff8a, 3), 0.62, 0, 0.1);
   add(g, new THREE.SphereGeometry(0.03, 6, 6), glow(0xfff0c0, 4), 0.18, 0.68, -0.1);
+  const hullParts = [...g.children];
+  const navLights = hullParts.slice(-3);
   // Flammes : jet principal (dégradé bleu → orange), deux propulseurs latéraux, halo et gerbe d'étincelles
   const flameMat = (inner, outer) => new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -610,7 +612,45 @@ export function createShip() {
     halo.scale.setScalar(0.6 + k * 0.8);
     // Moteurs coupés (vaisseau posé) : aucune flamme ni lueur
     const on = k > 0.005;
-    [main, inner, ...sides, halo, sparks].forEach((o) => { o.visible = on; });
+    [main, inner, ...sides, halo, sparks].forEach((o) => { o.visible = on && !o.userData.off; });
+  };
+  // Coque fournie (modèle 3D) : remplace la coque dessinée ; les flammes sortent de ses deux réacteurs
+  g.userData.setHull = (model, length = 1.75) => {
+    hullParts.forEach((o) => { if (!navLights.includes(o)) o.visible = false; });
+    const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
+    const k = length / size.z;
+    model.scale.setScalar(k);
+    model.position.set(-((box.min.x + box.max.x) / 2) * k, -0.9 - box.min.y * k, -((box.min.z + box.max.z) / 2) * k);
+    g.add(model);
+    // Réacteurs : sommets les plus en arrière, de part et d'autre de l'axe
+    model.updateMatrixWorld(true);
+    const v = new THREE.Vector3(), acc = { l: [0, 0, 0, 0], r: [0, 0, 0, 0] };
+    let zMin = Infinity;
+    const pts = [];
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      const pa = o.geometry.attributes.position;
+      for (let i = 0; i < pa.count; i += 3) { v.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld); pts.push(v.x, v.y, v.z); zMin = Math.min(zMin, v.z); }
+    });
+    for (let i = 0; i < pts.length; i += 3) {
+      if (pts[i + 2] > zMin + length * 0.06) continue;
+      const a = pts[i] < 0 ? acc.l : acc.r;
+      a[0] += pts[i]; a[1] += pts[i + 1]; a[2] += pts[i + 2]; a[3]++;
+    }
+    const eng = [acc.l, acc.r].filter((a) => a[3]).map((a) => new THREE.Vector3(a[0] / a[3], a[1] / a[3], a[2] / a[3]));
+    main.userData.off = inner.userData.off = true;
+    sides.forEach((f, i) => {
+      const e = eng[i] || eng[0];
+      if (!e) return;
+      f.position.set(e.x, e.y, zMin + 0.02);
+      f.scale.set(0.55, 0.55, 0.7);
+    });
+    halo.position.set(0, eng[0]?.y ?? 0, zMin - 0.1);
+    for (const o of navLights) {
+      // Feux de position au bout des ailes
+      if (Math.abs(o.position.x) > 0.3) o.position.set(Math.sign(o.position.x) * size.x * k * 0.47, -0.62, zMin + length * 0.12);
+      else o.position.set(0, -0.9 + size.y * k * 0.98, -0.1);
+    }
   };
   return g;
 }

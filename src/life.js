@@ -10,25 +10,42 @@ const flat = (x, z, R = 4) => new THREE.Vector3(x, Math.sqrt(Math.max(R * R - x 
 // ---------------------------------------------------------------------------
 // Personnages et animaux (modèles en mètres, fusionnés par le kit)
 // ---------------------------------------------------------------------------
-const SKIN = [0xe8b896, 0xc98e66, 0x8d5a3c, 0xf0c8a8];
+// Personnages : figurine fournie (pnj.glb), déclinée en couleurs ; chapeaux et décorations ajoutés par-dessus
+let PNJ = null;
+const LEGO_YELLOW = 0xf2c94c;
+const matCache = new Map();
+const legoMat = (c) => { if (!matCache.has(c)) matCache.set(c, new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.0 })); return matCache.get(c); };
 function person(o = {}) {
-  const k = new Kit(), g = new THREE.Group();
-  const coat = o.coat ?? 0x5b6f8c, legs = o.legs ?? 0x2f3540, skin = o.skin ?? SKIN[(o.seed || 0) % 4];
+  const g = new THREE.Group();
+  const coat = o.coat ?? 0x5b6f8c, legs = o.long ? coat : (o.legs ?? 0x2f3540), skin = o.skin ?? LEGO_YELLOW;
   const c = { collide: false };
-  for (const sx of [-1, 1]) k.box(0.15, 0.82, 0.17, sx * 0.1, 0, 0, legs, c);
-  // La blouse (biaude) descend aux genoux
-  if (o.long) k.box(0.46, 0.62, 0.28, 0, 0.42, 0, coat, c);
-  k.box(0.44, 0.6, 0.26, 0, 0.82, 0, coat, c);
-  for (const sx of [-1, 1]) k.box(0.12, 0.58, 0.14, sx * 0.29, 0.8, 0, coat, c);
-  k.box(0.12, 0.08, 0.12, 0, 1.42, 0, skin, c);
-  k.sphere(0.15, 0, 1.62, 0, skin, { seg: 8 });
-  if (o.hair !== false) k.sphere(0.16, 0, 1.66, -0.02, o.hair ?? 0x3a2a1e, { seg: 8, sy: 0.8 });
-  if (o.hat === 'beret') k.cyl(0.2, 0.17, 0.05, 0.03, 1.77, 0, o.hatCol ?? 0x23262c, c);
-  if (o.hat === 'cap') { k.cyl(0.16, 0.16, 0.08, 0, 1.74, 0, o.hatCol ?? 0x2b4c7a, c); k.box(0.2, 0.02, 0.14, 0, 1.74, 0.16, o.hatCol ?? 0x2b4c7a, c); }
-  if (o.hat === 'helmet') k.sphere(0.2, 0, 1.64, 0, o.hatCol ?? 0xe8e8ea, { seg: 8 });
-  if (o.hat === 'hood') k.box(0.36, 0.36, 0.34, 0, 1.46, -0.02, coat, c);
-  if (o.deco) for (let i = 0; i < 5; i++) k.box(0.05, 0.05, 0.01, -0.14 + i * 0.07, 1.2 - (i % 2) * 0.1, 0.135, [0xd8a53a, 0xb8423a, 0x3f7fb5, 0xe8e2d0, 0x4c8a4f][i], c);
-  if (o.badge) k.box(0.1, 0.07, 0.01, 0.1, 1.18, 0.135, o.badge, c);
+  let top = 1.75, front = 0.21;
+  if (PNJ) {
+    const m = PNJ.clone();
+    const box = new THREE.Box3().setFromObject(m), size = box.getSize(new THREE.Vector3());
+    const k = 1.75 / size.y;
+    m.scale.setScalar(k);
+    m.position.set(-((box.min.x + box.max.x) / 2) * k, -box.min.y * k, -((box.min.z + box.max.z) / 2) * k);
+    m.traverse((p) => {
+      if (!p.isMesh) return;
+      const n = p.name;
+      p.material = legoMat(/Head|Hand/.test(n) ? skin : /Torso|Arm/.test(n) ? coat : legs);
+    });
+    g.add(m);
+    front = (size.z / 2) * k;
+  }
+  const k = new Kit();
+  // Visage : yeux et sourire
+  for (const sx of [-1, 1]) k.box(0.035, 0.05, 0.01, sx * 0.06, 1.55, 0.13, 0x1a1a1a, c);
+  k.box(0.1, 0.018, 0.01, 0, 1.47, 0.13, 0x1a1a1a, c);
+  if (o.hair !== false && !o.hat) k.box(0.3, 0.07, 0.28, 0, top - 0.04, -0.01, o.hair ?? 0x3a2a1e, c);
+  if (o.hat === 'beret') k.cyl(0.19, 0.16, 0.05, 0.03, top - 0.02, 0, o.hatCol ?? 0x23262c, c);
+  if (o.hat === 'cap') { k.cyl(0.16, 0.16, 0.08, 0, top - 0.04, 0, o.hatCol ?? 0x2b4c7a, c); k.box(0.2, 0.02, 0.14, 0, top - 0.04, 0.16, o.hatCol ?? 0x2b4c7a, c); }
+  if (o.hat === 'helmet') k.sphere(0.19, 0, 1.6, 0, o.hatCol ?? 0xe8e8ea, { seg: 8 });
+  if (o.hat === 'hood') k.box(0.34, 0.22, 0.3, 0, 1.56, -0.04, coat, c);
+  // Bucque et pin's sur la biaude
+  if (o.deco) for (let i = 0; i < 5; i++) k.box(0.05, 0.05, 0.01, -0.12 + i * 0.06, 1.12 - (i % 2) * 0.08, front + 0.004, [0xd8a53a, 0xb8423a, 0x3f7fb5, 0xe8e2d0, 0x4c8a4f][i], c);
+  if (o.badge) k.box(0.1, 0.07, 0.01, 0.1, 1.1, front + 0.004, o.badge, c);
   k.build(g); plain(g);
   return g;
 }
@@ -154,6 +171,7 @@ const LIFE = {
       { at: [219, 298], h: 1.72, r: 30, name: 'Tour solaire · cœlostat', sun: true },
     ],
     props: [
+      { at: [232, 306], panel: 'soleil', label: 'consulter les écrans du laboratoire solaire' },
       { at: [470, 540], label: 'écouter l’interféromètre', say: ['Dans le casque : le souffle du Soleil à 169 MHz, et un sursaut radio de type III qui dévale les fréquences.', 'Friture, puis un long sifflement descendant. Des électrons quittent la couronne.'] },
       { at: [540, 462], label: 'orienter l’antenne', say: ['L’antenne pivote vers ASTRA. Sur l’écran, une raie à 21 cm : de l’hydrogène neutre.', 'Signal périodique, 1,337 s. Un pulsar… ou le micro-ondes du labo.'] },
       { at: [300, 664], label: 'regarder le bassin', say: ['Le ciel se reflète dans le bassin. Par temps clair, on y devine la Grande Coupole à l’envers.'] },
@@ -253,7 +271,64 @@ const WANDER = {
 };
 
 // ---------------------------------------------------------------------------
-export function setupLife({ BODIES, toonify }) {
+// Écrans du laboratoire solaire (tour solaire de Meudon) : le Soleil en direct
+// Sources réunies par la page « Le Soleil en direct » d'astrosurf (jiaifer)
+// ---------------------------------------------------------------------------
+const SOLAR_LIVE = [
+  ['SDO · AIA 304 Å', 'Chromosphère et protubérances (hélium ionisé, ≈ 50 000 K)', 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg'],
+  ['SDO · AIA 171 Å', 'Couronne calme : boucles magnétiques (fer, ≈ 600 000 K)', 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg'],
+  ['SDO · AIA 193 Å', 'Couronne et trous coronaux (≈ 1,2 MK)', 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg'],
+  ['SDO · HMI continuum', 'Photosphère : taches solaires', 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg'],
+  ['SDO · HMI magnétogramme', 'Polarité du champ magnétique en surface', 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg'],
+  ['SOHO · LASCO C2', 'Coronographe : éjections de masse coronale (2 à 6 R☉)', 'https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg'],
+  ['SOHO · LASCO C3', 'Coronographe large champ (jusqu\u2019à 30 R☉)', 'https://soho.nascom.nasa.gov/data/realtime/c3/512/latest.jpg'],
+];
+const SOLAR_LINKS = [
+  ['BASS2000 — Observatoire de Paris, Meudon', 'https://bass2000.obspm.fr/home.php?lang=fr'],
+  ['CLIMSO — Pic du Midi', 'https://climso.fr/'],
+  ['GONG — réseau Hα', 'https://gong2.nso.edu/products/tableView/table.php?configFile=configs/hAlpha.cfg'],
+  ['SDO — Le Soleil aujourd\u2019hui', 'https://sdowww.lmsal.com/suntoday/'],
+  ['SILSO — nombre de taches', 'https://www.sidc.be/silso/ssngraphics'],
+  ['Solarmonitor — régions actives', 'https://www.solarmonitor.org/'],
+  ['SpaceWeatherLive — activité solaire', 'https://www.spaceweatherlive.com/fr/activite-solaire'],
+  ['NOAA SWPC — alertes', 'https://www.swpc.noaa.gov/'],
+  ['JHelioviewer', 'https://www.jhelioviewer.org/'],
+  ['Source : « Le Soleil en direct » (astrosurf)', 'https://www.astrosurf.com/jiaifer/pagesoleilendirect.htm'],
+];
+let solarEl = null;
+export function solarOpen() { return !!solarEl?.classList.contains('on'); }
+export function closeSolar() { solarEl?.classList.remove('on'); }
+function openSolar() {
+  if (!solarEl) {
+    solarEl = document.createElement('div');
+    solarEl.id = 'solar-lab';
+    const stamp = Math.floor(Date.now() / 600000);
+    solarEl.innerHTML = `<div class="sl-head"><b>Tour solaire de Meudon · Laboratoire</b><span>Le Soleil en direct · E ou Échap pour fermer</span><button type="button" aria-label="Fermer">×</button></div>
+      <div class="sl-grid">${SOLAR_LIVE.map(([t, d, u]) => `<figure><img loading="lazy" alt="${t}" src="${u}?t=${stamp}" onerror="this.closest('figure').classList.add('ko')"><figcaption><b>${t}</b>${d}</figcaption></figure>`).join('')}</div>
+      <div class="sl-links">${SOLAR_LINKS.map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`).join('')}</div>
+      <p class="sl-note">Depuis 1908, le spectrohéliographe de Meudon photographie la chromosphère presque chaque jour : l'une des plus longues séries d'observations solaires au monde, archivée dans BASS2000.</p>`;
+    solarEl.querySelector('button').addEventListener('click', closeSolar);
+    const st = document.createElement('style');
+    st.textContent = `#solar-lab{position:fixed;inset:6vh 6vw;z-index:80;display:none;flex-direction:column;gap:12px;padding:16px 18px;border-radius:14px;overflow:auto;
+      background:rgba(14,10,8,.92);border:1px solid rgba(255,140,60,.5);color:#f6e7d6;font:500 13px/1.4 'Space Grotesk',system-ui,sans-serif;box-shadow:0 0 60px rgba(255,90,20,.25)}
+      #solar-lab.on{display:flex}#solar-lab .sl-head{display:flex;align-items:baseline;gap:14px}#solar-lab .sl-head b{font-size:17px;color:#ffb35c}#solar-lab .sl-head span{opacity:.7;flex:1}
+      #solar-lab .sl-head button{background:none;border:1px solid rgba(255,179,92,.5);color:#ffb35c;border-radius:8px;width:30px;height:30px;font-size:18px;cursor:pointer}
+      #solar-lab .sl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+      #solar-lab figure{margin:0;background:#000;border-radius:10px;overflow:hidden;border:1px solid rgba(255,140,60,.25)}
+      #solar-lab img{display:block;width:100%;aspect-ratio:1;object-fit:cover;background:radial-gradient(circle,#3a1608,#000 70%)}
+      #solar-lab figure.ko img{opacity:.15}#solar-lab figure.ko figcaption::after{content:' — image indisponible ici';color:#ff8a6a}
+      #solar-lab figcaption{padding:7px 9px;font-size:12px;opacity:.9}#solar-lab figcaption b{display:block;color:#ffcf8a;font-size:12px}
+      #solar-lab .sl-links{display:flex;flex-wrap:wrap;gap:8px}#solar-lab .sl-links a{color:#ffd9a8;text-decoration:none;border:1px solid rgba(255,179,92,.35);border-radius:999px;padding:4px 10px;font-size:12px}
+      #solar-lab .sl-links a:hover{background:rgba(255,140,60,.15)}#solar-lab .sl-note{margin:0;opacity:.75;font-size:12px}`;
+    document.head.appendChild(st);
+    document.body.appendChild(solarEl);
+  }
+  if (document.pointerLockElement) document.exitPointerLock?.();
+  solarEl.classList.add('on');
+}
+
+export function setupLife({ BODIES, toonify, pnj = null }) {
+  PNJ = pnj;
   let seed = 9871;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const q = {}, wq = {};
@@ -318,19 +393,13 @@ export function setupLife({ BODIES, toonify }) {
         convs.push(conv);
         add(b, { p: c, r: 4, kind: 'talk', label: `parler à ${actors[0].name}`, conv });
       }
-      for (const [kind, a, say] of def.animals || []) {
-        const n = animal(kind);
-        const p = place(b, n, at(a), rnd() * 6.28);
-        if (!p) continue;
-        movers.push({ b, obj: n, wander: kind !== 'chouette' && kind !== 'chat' ? 1.5 + rnd() * 2 : 0, phase: rnd() * 6, hop: kind === 'poule' || kind === 'pigeon' || kind === 'goeland' });
-        add(b, { p, r: 3, kind: 'say', label: kind === 'chat' ? 'caresser le chat' : 'approcher', say: [say], follow: n });
-      }
       for (const pr of def.props || []) {
         const d = at(pr.at);
         let p;
         if (pr.sign) p = place(b, signpost(), d, 0, 1.2);
         else p = ground(b, d);
-        if (p) add(b, { p, r: pr.sign ? 3 : 5, kind: 'say', label: pr.label, say: pr.say });
+        if (p && pr.panel) add(b, { p, r: 6, kind: 'panel', label: pr.label, panel: pr.panel });
+        else if (p) add(b, { p, r: pr.sign ? 3 : 5, kind: 'say', label: pr.label, say: pr.say });
       }
       for (const sc of def.scopes || []) {
         const d = at(sc.at), p = ground(b, d);
@@ -364,8 +433,7 @@ export function setupLife({ BODIES, toonify }) {
           add(b, { p, r: 4, kind: 'talk', label: `parler : ${name}`, conv });
         }
       }
-      const rb = animal('robot'), d2 = randDir(b);
-      if (d2) { const p = place(b, rb, d2, rnd() * 6); if (p) { movers.push({ b, obj: rb, wander: 3, phase: rnd() * 6 }); add(b, { p, r: 3, kind: 'say', label: 'interroger la sonde', say: ['Bip. Échantillon de sol analysé : rien d’anormal.', 'Bip bip. Niveau de batterie : 62 %.', 'La sonde vous photographie, puis reprend sa ronde.'], follow: rb }); } }
+      // (pas de sonde : allègement)
     }
     // Un feu de camp par astre, et de quoi griller un chamallow
     const fd = def?.fire ? at(def.fire) : randDir(b);
@@ -412,6 +480,7 @@ export function setupLife({ BODIES, toonify }) {
     use(it) {
       if (it.kind === 'talk') { active = it.conv; nextLine(it.conv); }
       else if (it.kind === 'say') { it.n = it.random ? Math.floor(Math.random() * it.say.length) : ((it.n ?? -1) + 1) % it.say.length; show('', it.say[it.n], 5.5); }
+      else if (it.kind === 'panel') openSolar();
       else if (it.kind === 'laser') { it.las.manual = it.las.manual > 0 ? 0 : 20; show('', it.las.manual ? 'Le faisceau vert monte droit vers le ciel : une étoile artificielle s’allume dans la haute atmosphère.' : 'Laser coupé.', 5); }
     },
     update(dt, t, w) {

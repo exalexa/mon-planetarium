@@ -1,4 +1,4 @@
-import { setupLife } from './life.js';
+import { setupLife, solarOpen, closeSolar } from './life.js';
 import './style.css';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -10,7 +10,7 @@ import {
 import { createShip, globularCluster } from './models.js';
 import { populate, THEMES } from './cover.js';
 import { stepWalker, walkerView, PERSON } from './walker.js';
-import { buildInterior, buildRover } from './shipdeck.js';
+import { buildInterior, buildRover, roverFromModel } from './shipdeck.js';
 import { U as KIT_U } from './kit.js';
 import { createCockpit, glitchify, flickerGlitch, glitchTspans, updateVHS } from './cockpit.js';
 import { createLandmarkMoon } from './landmarks.js';
@@ -530,7 +530,7 @@ function buildSystem(gltf) {
   }
   byId.lexa.viewRadius = SUN_RADIUS;
   setupWalking();
-  life = setupLife({ BODIES, toonify });
+  assetsP.then((a) => { life = setupLife({ BODIES, toonify, pnj: a.pnj }); });
   // Éléments animés des monuments (train du RER à Meudon…)
   for (const b of BODIES) b.obj?.traverse((o) => { if (o.userData.tick) ticks.push(o.userData.tick); });
   ready = true;
@@ -1566,7 +1566,9 @@ function mountDeck() {
   if (deck && deck.body === L.body) return deck;
   unmountDeck();
   const b = L.body, W = b.walk, obj = b.obj;
-  const info = buildInterior(SHIP_M / shipLength());
+  const km = SHIP_M / shipLength();
+  // Cabine dans le fuselage : environ 5 m × 9 m, plancher un peu au-dessus du train d'atterrissage
+  const info = buildInterior(km, MODELS.vaisseau ? { W: 5, D: 9, FY: 1.1 } : null);
   toonify(info.group);
   // Repère du vaisseau posé, exprimé dans celui de l'astre
   obj.updateMatrixWorld(true);
@@ -1582,7 +1584,7 @@ function mountDeck() {
   obj.add(info.group);
   const grp = { m, inv: m.clone().invert(), s, center: pos.clone(), radius: 16 * W.m2u, col: info.group.userData.colliders };
   W.groups.push(grp);
-  const rover = buildRover(); toonify(rover); rover.name = 'rover';
+  const rover = MODELS.explorer ? roverFromModel(MODELS.explorer) : buildRover(); toonify(rover); rover.name = 'rover';
   obj.add(rover);
   deck = { body: b, group: info.group, grp, info, fw, rover: { obj: rover, p: info.bay.clone().applyMatrix4(m), heading: x.clone(), out: false } };
   placeRover(deck.rover, W);
@@ -1886,7 +1888,12 @@ function updateWalker(dt) {
   }
   // De l'intérieur, on ne voit pas la coque : seulement la cabine
   const dl0 = deckLocal(w);
-  ship.visible = !(dl0 && deck.info.inside(dl0));
+  const inCabin = !!(dl0 && deck.info.inside(dl0));
+  ship.visible = !inCabin;
+  // La cabine ne se montre que de l'intérieur : dehors, on voit la coque du vaisseau
+  if (deck) for (const o of deck.info.cabin) o.visible = inCabin;
+  // L'amphibie n'apparaît dehors qu'une fois descendu par la rampe
+  if (deck) deck.rover.obj.visible = inCabin || deck.rover.out;
   ship.userData.setThrust(0, simTime);
   autoThrust = 0;
   pushTrail(ship.position, 0);
@@ -2226,6 +2233,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyV' && !e.ctrlKey) { toggleView(); return; }
   if (e.code === 'KeyI') { document.body.classList.toggle('show-info'); return; }
   if (mode === 'free') {
+    if (solarOpen() && (e.code === 'KeyE' || e.code === 'Escape')) { closeSolar(); return; }
     if (e.code === 'KeyE') { freeAction(); return; }
     if (e.code === 'Escape' && free.walker?.scope) { free.walker.scope = false; return; }
     if (e.ctrlKey) free.keys.add('ctrl');
@@ -2450,6 +2458,26 @@ function debugWalk(id, x, y, z, yaw = 0, pitch = -0.1) {
 }
 if (location.search.includes('debug')) window.__debug = { spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship, debugWalk, keys: free.keys, placeShipAtBase, launchSite };
 const gltfLoader = new GLTFLoader();
+// Modèles fournis : vaisseau, véhicule d'exploration, personnage (embarqués en base64 dans l'aperçu)
+const MODELS = {};
+function loadModel(name) {
+  return new Promise((res) => {
+    const b64 = window.__MODELS__?.[name];
+    const ok = (g) => res(g.scene), ko = () => res(null);
+    if (b64) gltfLoader.parse(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer, '', ok, ko);
+    else gltfLoader.load(import.meta.env.BASE_URL + 'models/' + name + '.glb', ok, undefined, ko);
+  });
+}
+const assetsP = Promise.all(['vaisseau', 'explorer', 'pnj'].map(loadModel)).then(([vaisseau, explorer, pnj]) => {
+  Object.assign(MODELS, { vaisseau, explorer, pnj });
+  if (vaisseau) {
+    toonify(vaisseau);
+    ship.userData.setHull(vaisseau);
+    shipLen1 = 0;
+  }
+  if (explorer) toonify(explorer);
+  return MODELS;
+});
 if (window.__PLANETARIUM_GLB__) {
   // Modèle embarqué en base64 (version aperçu hébergée sans fichier .glb)
   const bin = Uint8Array.from(atob(window.__PLANETARIUM_GLB__), (c) => c.charCodeAt(0));
