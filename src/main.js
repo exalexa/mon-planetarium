@@ -6,7 +6,9 @@ import {
   createAsteroidBelt, createGalaxies, createProminences, createComet, createMapDot,
   createAurora, createBowShock, createCME,
 } from './effects.js';
-import { createShip, createRover, globularCluster } from './models.js';
+import { createShip, globularCluster } from './models.js';
+import { populate, THEMES } from './cover.js';
+import { stepWalker, walkerView, PERSON } from './walker.js';
 import { createCockpit, glitchify, flickerGlitch, glitchTspans, updateVHS } from './cockpit.js';
 import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
@@ -87,9 +89,6 @@ stars.add(omegaCluster);
 const ship = createShip();
 ship.visible = false;
 scene.add(ship);
-const rover = createRover();
-rover.visible = false;
-scene.add(rover);
 const TRAIL_N = 90;
 const trail = new THREE.Line(
   new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 3), 3))
@@ -400,8 +399,7 @@ function buildSystem(gltf) {
   }
   for (const b of BODIES) if (b.obj && b.kind !== 'star') toonify(b.obj);
   toonify(ship);
-  toonify(rover);
-  // L'océan de PERSION : le véhicule amphibie y navigue
+  // L'océan de PERSION
   if (byId.persion?.obj) byId.persion.obj.userData.water = true;
   // Grande lunette de Meudon : pièces animées
   const mo = byId.meudon?.obj;
@@ -450,7 +448,12 @@ function buildSystem(gltf) {
       let inRocket = false, leaf = false;
       for (let q = o; q && q !== b.obj; q = q.parent) { if (q.name === 'Rocket') inRocket = true; if (/Feuille/.test(q.name)) leaf = true; }
       o.userData.terrain = !inRocket && !leaf;
-    });
+    });  // PERSION : la sphère bleue est l'océan, le continent est le rocher ; les nuages ne portent rien
+  if (byId.persion?.obj) {
+    byId.persion.obj.userData.terrain = false;
+    byId.persion.obj.traverse((o) => { if (/Nuage/.test(o.name)) o.userData.terrain = false; });
+  }
+
   }
 
   placeBodies(0);
@@ -461,7 +464,72 @@ function buildSystem(gltf) {
     byId.proxion.launchLocal = byId.proxion.obj.worldToLocal(rocket.getWorldPosition(new THREE.Vector3()));
   }
   byId.lexa.viewRadius = SUN_RADIUS;
+  setupWalking();
   ready = true;
+}
+
+// ---------------------------------------------------------------------------
+// Astres praticables à pied : peuplement (villages, forêts, lacs) et données de collision
+// ---------------------------------------------------------------------------
+const WATER_MAT = new THREE.MeshStandardMaterial({ color: 0x3a8fc0, roughness: 0.22, metalness: 0.1, emissive: 0x0b2c44, emissiveIntensity: 0.35, transparent: true, opacity: 0.9 });
+function terrainCentroid(obj) {
+  obj.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const sum = new THREE.Vector3(), v = new THREE.Vector3();
+  let n = 0;
+  obj.traverse((o) => {
+    if (!o.isMesh || !(o.userData.terrain || o.userData.water)) return;
+    const m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 3) { sum.add(v.fromBufferAttribute(pos, i).applyMatrix4(m)); n++; }
+  });
+  return n ? sum.divideScalar(n) : new THREE.Vector3();
+}
+function colliderGroups(obj) {
+  obj.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const out = [];
+  let scope = null;
+  obj.traverse((o) => {
+    if (o.name === 'cover') return;
+    if (o.userData.scope) scope = { obj: o, ...o.userData.scope };
+    const col = o.userData.colliders;
+    if (!col || !(col.boxes.length || col.cyls.length || col.rings.length)) return;
+    const m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    const sc = new THREE.Vector3().setFromMatrixScale(m).x;
+    let rad = 0;
+    for (const b of col.boxes) rad = Math.max(rad, Math.hypot(Math.max(Math.abs(b[0]), Math.abs(b[3])), Math.max(Math.abs(b[1]), Math.abs(b[4])), Math.max(Math.abs(b[2]), Math.abs(b[5]))));
+    for (const c of col.cyls) rad = Math.max(rad, Math.hypot(c[0], c[1]) + c[2] + Math.abs(c[4]));
+    for (const r of col.rings) rad = Math.max(rad, Math.hypot(r.x, r.z) + r.r + r.y1);
+    out.push({ m, inv: m.clone().invert(), s: sc, center: new THREE.Vector3().setFromMatrixPosition(m), radius: rad * sc, col });
+  });
+  if (scope) {
+    const m = new THREE.Matrix4().multiplyMatrices(inv, scope.obj.matrixWorld);
+    scope.m = m; scope.inv = m.clone().invert();
+  }
+  return { groups: out, scope };
+}
+function setupWalking() {
+  const t0 = performance.now();
+  for (const b of BODIES) {
+    const theme = THEMES[b.id];
+    if (!theme || !b.obj) continue;
+    const center = b.glb ? terrainCentroid(b.obj) : new THREE.Vector3();
+    let exclude = null;
+    if (b.isLandmark) {
+      const cosCap = Math.cos((b.obj.userData.cap || 0.62) + 0.07);
+      exclude = (d) => d.y > cosCap;
+    } else if (theme.exclude === 'rocket' && b.launchLocal) {
+      const rd = b.launchLocal.clone().sub(center).normalize();
+      exclude = (d) => d.angleTo(rd) < 0.34;
+    }
+    const res = populate(b, { center, m2u: b.isLandmark ? 0.095 / 1.75 : null, theme, seed: b.id.length * 97 + b.id.charCodeAt(0), exclude, waterMat: WATER_MAT });
+    toonify(res.group);
+    const { groups, scope } = colliderGroups(b.obj);
+    b.walk = { center, m2u: res.m2u, sampler: res.sampler, water: res.water, groups: groups.concat(res.colliders.map((g) => ({ ...g, inv: g.m.clone().invert() }))), R: res.R, scope };
+    b.landable = true;
+  }
+  if (location.search.includes('debug')) console.log('T: peuplement', Math.round(performance.now() - t0), 'ms');
 }
 
 // ---------------------------------------------------------------------------
@@ -608,7 +676,7 @@ function updateTelescope(dt) {
   const d = OMEGA_DIR.clone().applyQuaternion(qInv);
   tele.rot.rotation.y = Math.atan2(d.x, d.z);
   tele.alt.rotation.x = -Math.max(0.05, Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)));
-  const target = current?.id === 'omega' ? 1 : 0;
+  const target = current?.id === 'omega' || insideDome() ? 1 : 0;
   tele.open += (target - tele.open) * Math.min(1, dt * 1.2);
   tele.a.rotation.y = -tele.open * (tele.gap / 2 + 0.03);
   tele.b.rotation.y = tele.open * (tele.gap / 2 + 0.03);
@@ -901,7 +969,6 @@ function updateCamera(dt) {
   const targetFov = f.fov ?? 50;
   let fov = targetFov;
   ship.visible = trail.visible = false; // en pilote automatique, on est dans le cockpit
-  rover.visible = false;
   camera.up.set(0, 1, 0);
   autoThrust = 0.04;
   if (trans && trans.kind === 'transfer') {
@@ -977,9 +1044,9 @@ function updateCamera(dt) {
     ship.scale.setScalar(d * 0.075);
     ship.userData.setThrust(autoThrust, simTime);
     pushTrail(ship.localToWorld(new THREE.Vector3(0, 0, -1.1)), autoThrust);
-    camera.position.copy(P).add(new THREE.Vector3(0, d * 0.34, d * 1.1).applyQuaternion(q));
+    camera.position.copy(P).add(new THREE.Vector3(0, d * 0.72, d * 0.95).applyQuaternion(q));
     camera.up.set(0, 1, 0).applyQuaternion(q);
-    camera.lookAt(P.clone().add(new THREE.Vector3(0, 0, -d * 1.6).applyQuaternion(q)));
+    camera.lookAt(P.clone().add(new THREE.Vector3(0, 0, -d * 0.9).applyQuaternion(q)));
     camera.up.set(0, 1, 0);
   }
   camera.userData.baseFov = trans ? fov : targetFov;
@@ -1131,7 +1198,7 @@ function pushTrail(p, w) {
 }
 
 // Cockpit sur grand écran : la vue se limite à la verrière (64 % supérieurs de l'écran)
-function cockpitLayout() { return window.innerWidth > 760 && views[mode] === 'fpv' && !(mode === 'free' && free.rover); }
+function cockpitLayout() { return window.innerWidth > 760 && views[mode] === 'fpv' && !(mode === 'free' && free.walker); }
 function computeViewOffset() {
   const w = window.innerWidth, h = window.innerHeight;
   const mobile = w <= 760;
@@ -1172,6 +1239,7 @@ function syncLayout() {
   const btn = document.getElementById('view-toggle');
   btn.textContent = views[mode] === 'fpv' ? 'Vue cockpit' : 'Vue extérieure';
   btn.classList.toggle('fpv', views[mode] === 'fpv');
+  document.body.classList.toggle('walking', mode === 'free' && !!free.walker);
   if (cockpitLayout() && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
   if (cockpitLayout() && ui.panelBody.textContent && !ui.panelBody.querySelector('.gc')) glitchify(ui.panelBody);
   computeViewOffset();
@@ -1186,14 +1254,27 @@ document.getElementById('view-toggle').addEventListener('click', (e) => { e.stop
 const free = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), offset: new THREE.Vector3(), ang: new THREE.Vector3(),
   anchor: null, target: null, near: null, keys: new Set(), dist: 8, camPos: new THREE.Vector3(), init: false,
-  landed: null, rover: null, shipScale: 0.9, touchRot: { x: 0, y: 0 },
+  landed: null, walker: null, shipScale: 0.9, touchRot: { x: 0, y: 0 },
 };
 // Commandes : ZQSD (ou WASD, mêmes touches physiques) pour se déplacer, Espace / C pour monter / descendre,
-// flèches pour le tangage et le lacet, Ctrl + flèches gauche/droite pour le roulis, Maj pour accélérer, E pour le véhicule
+// flèches pour le tangage et le lacet, Ctrl + flèches gauche/droite pour le roulis, Maj pour accélérer, E pour sortir à pied
 const KEYMAP = {
   KeyW: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right', Space: 'up', KeyC: 'down', ShiftLeft: 'boost', ShiftRight: 'boost',
   ArrowUp: 'pu', ArrowDown: 'pd', ArrowLeft: 'yl', ArrowRight: 'yr', ControlLeft: 'ctrl', ControlRight: 'ctrl',
 };
+let shipLen1 = 0;
+function shipLength() {
+  if (!shipLen1) {
+    const s = ship.scale.x, p = ship.position.clone(), qq = ship.quaternion.clone();
+    ship.scale.setScalar(1); ship.position.set(0, 0, 0); ship.quaternion.identity();
+    ship.userData.setThrust(0, 0);
+    ship.updateMatrixWorld(true);
+    const bx = new THREE.Box3().setFromObject(ship);
+    shipLen1 = Math.max(bx.max.x - bx.min.x, bx.max.y - bx.min.y, bx.max.z - bx.min.z) || 2;
+    ship.scale.setScalar(s); ship.position.copy(p); ship.quaternion.copy(qq);
+  }
+  return shipLen1;
+}
 function bodyRadius(b) { return b.atmosphere?.radius || b.radius || b.viewRadius || 2; }
 // Pesanteur à la surface (unités / s²) : de quoi sentir l'attraction sans rendre le pilotage pénible
 function surfaceGravity(b) { return b.gas ? 9 : b.kind === 'planet' ? (b.dwarf ? 1.2 : 5) : 1.6; }
@@ -1249,7 +1330,7 @@ function placeShipAtBase() {
   mTmp.makeBasis(L.up.clone().cross(f).normalize(), L.up, f);
   ship.quaternion.setFromRotationMatrix(mTmp);
   const inv = L.body.obj.matrixWorld.clone().invert();
-  free.landed = { body: L.body, local: L.body.obj.worldToLocal(pos.clone()), localUp: L.up.clone().transformDirection(inv) };
+  free.landed = { body: L.body, ground: L.body.obj.worldToLocal(L.point.clone()), localUp: L.up.clone().transformDirection(inv) };
   free.anchor = L.body;
   free.pos.copy(pos);
   free.offset.copy(pos).sub(bodyCenter(L.body));
@@ -1304,8 +1385,7 @@ function enterFree() {
   // Le vaisseau (avant +Z) prend l'orientation de la caméra (qui regarde vers −Z)
   ship.quaternion.copy(camera.quaternion).multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI));
   free.landed = null;
-  free.rover = null;
-  rover.visible = false;
+  leaveWalker();
   trans = null;
   trail.userData.n = 0;
   free.init = true;
@@ -1328,12 +1408,11 @@ function setMode(m, silent = false) {
     enterFree();
   } else {
     // Retour au pilote automatique : on rejoint l'astre le plus proche
-    const here = free.rover ? rover.position : ship.position;
+    const here = ship.position;
     const n = findNear(here) || findAnchor(here) || byId.lexa;
     free.keys.clear();
-    free.rover = null;
+    leaveWalker();
     free.landed = null;
-    rover.visible = false;
     camera.up.set(0, 1, 0);
     goTo(n.id, true);
   }
@@ -1351,35 +1430,60 @@ document.querySelectorAll('#flight-pad button').forEach((btn) => {
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, () => free.keys.delete(k)));
 });
 
-// Touche E : sortir le véhicule une fois posé, ou remonter à bord
+// Touche E : sortir du vaisseau une fois posé, remonter à bord, ou regarder dans la lunette
 function freeAction() {
   if (mode !== 'free') return;
-  if (free.rover) {
-    const d = rover.position.distanceTo(ship.position);
-    if (d < free.shipScale * 3.5 + free.rover.scale * 6) {
-      free.rover = null;
-      rover.visible = false;
+  const w = free.walker;
+  if (w) {
+    const W = w.body.walk;
+    if (w.scope) { w.scope = false; hint('', 0); return; }
+    if (nearScope(w)) { w.scope = true; hint('Grande lunette de Meudon : ω Centauri · E pour se relever', 6); return; }
+    const shipLocal = w.body.obj.worldToLocal(ship.position.clone());
+    if (shipLocal.distanceTo(w.p) < 12 * W.m2u) {
+      leaveWalker();
       syncLayout();
       hint('De retour à bord · Espace ou Z pour décoller', 5);
-    } else {
-      hint('Rapprochez-vous du vaisseau pour remonter à bord', 3);
-    }
+    } else hint('Rapprochez-vous du vaisseau pour remonter à bord', 3);
     return;
   }
   if (!free.landed) { hint('Posez-vous d’abord sur une surface solide', 3); return; }
-  const L = free.landed, b = L.body;
-  const s = THREE.MathUtils.clamp(bodyRadius(b) * 0.035, 0.035, 0.3);
-  const up = L.localUp.clone().transformDirection(b.obj.matrixWorld);
-  const shipFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
-  const side = up.clone().cross(shipFwd).normalize();
-  const start = ship.position.clone().addScaledVector(side, free.shipScale * 2.2);
-  const fwd = shipFwd.clone().addScaledVector(up, -shipFwd.dot(up)).normalize();
-  const inv = b.obj.matrixWorld.clone().invert();
-  free.rover = { body: b, scale: s, speed: 0, local: b.obj.worldToLocal(start.clone()), localFwd: fwd.clone().transformDirection(inv) };
-  rover.visible = true;
-  rover.scale.setScalar(s);
+  const b = free.landed.body;
+  if (!b.walk) { hint(`On ne peut pas marcher sur ${b.name}`, 3); return; }
+  const W = b.walk, obj = b.obj;
+  // Le personnage descend à côté du vaisseau
+  const shipLocal = obj.worldToLocal(ship.position.clone());
+  const upL = shipLocal.clone().sub(W.center).normalize();
+  const fwdW = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
+  const fwdL = fwdW.transformDirection(new THREE.Matrix4().copy(obj.matrixWorld).invert());
+  const side = new THREE.Vector3().crossVectors(upL, fwdL).normalize();
+  const p = shipLocal.clone().addScaledVector(side, 7 * W.m2u);
+  const dir = p.clone().sub(W.center).normalize();
+  const q = {}; W.sampler.query(dir, q);
+  p.copy(W.center).addScaledVector(dir, (q.r > 0 ? q.r : p.distanceTo(W.center)) + 0.3 * W.m2u);
+  free.walker = { body: b, p, v: new THREE.Vector3(), heading: fwdL.clone().addScaledVector(dir, -fwdL.dot(dir)).normalize(), pitch: -0.05, onGround: false, swim: false, scope: false };
+  user.yaw = user.tYaw = user.pitch = user.tPitch = 0;
   syncLayout();
-  hint('Véhicule : Z / S avancer et reculer, Q / D tourner · E pour remonter (près du vaisseau)', 7);
+  hint('À pied : ZQSD pour marcher, souris ou flèches pour regarder, Espace pour sauter, Maj pour courir · E près du vaisseau pour remonter', 9);
+}
+function leaveWalker() {
+  if (!free.walker) return;
+  free.walker = null;
+  camera.near = 0.05; camera.updateProjectionMatrix();
+  if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+  document.getElementById('eyepiece').classList.remove('on');
+  document.body.classList.remove('in-scope');
+}
+function nearScope(w) {
+  const S = w.body.walk.scope;
+  if (!S) return false;
+  const l = w.p.clone().applyMatrix4(S.inv);
+  return Math.hypot(l.x - S.x, l.z - S.z) < S.r && Math.abs(l.y - S.y) < 0.06;
+}
+function insideDome() {
+  const w = free.walker;
+  if (mode !== 'free' || !w || w.body.id !== 'meudon' || !w.body.walk.scope) return false;
+  const l = w.p.clone().applyMatrix4(w.body.walk.scope.inv);
+  return Math.hypot(l.x, l.z) < 0.62 && l.y > 0.78;
 }
 
 const qStep = new THREE.Quaternion();
@@ -1395,22 +1499,27 @@ function updateFree(dt) {
   // Référentiel : on suit l'astre dominant (alignement de vitesse automatique)
   if (free.anchor && !free.landed) free.pos.copy(bodyCenter(free.anchor)).add(free.offset);
   if (!free.landed) free.anchor = findAnchor(free.pos);
-  const scaleTarget = free.anchor ? THREE.MathUtils.clamp(bodyRadius(free.anchor) * 0.12, 0.12, 0.9) : 0.9;
+  let scaleTarget = free.anchor ? THREE.MathUtils.clamp(bodyRadius(free.anchor) * 0.12, 0.12, 0.9) : 0.9;
+  // Près d'un astre praticable, le vaisseau prend sa taille réelle (≈ 14 m) à l'échelle du personnage
+  const ref = free.landed?.body || free.anchor;
+  if (ref?.walk && free.pos.distanceTo(bodyCenter(ref)) < bodyRadius(ref) * 4) {
+    scaleTarget = Math.min(scaleTarget, (14 * ref.walk.m2u * ref.obj.getWorldScale(tmpV).x) / shipLength());
+  }
   free.shipScale += (scaleTarget - free.shipScale) * Math.min(1, dt * 2);
   ship.scale.setScalar(free.shipScale);
   ship.visible = true;
   let thrust = 0.08, boost = false;
   let camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(ship.quaternion);
 
-  if (free.rover) {
-    updateRover(dt);
+  if (free.walker) {
+    updateWalker(dt);
     return;
   }
   if (free.landed) {
     // Posé : le vaisseau reste solidaire du sol (et tourne avec l'astre)
     const L = free.landed, obj = L.body.obj;
-    free.pos.copy(obj.localToWorld(L.local.clone()));
     const up = L.localUp.clone().transformDirection(obj.matrixWorld);
+    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, 0.9 * free.shipScale);
     const f = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
     f.addScaledVector(up, -f.dot(up));
     if (f.lengthSq() < 1e-6) f.copy(up).cross(AX.x);
@@ -1495,10 +1604,10 @@ function updateFree(dt) {
           const land = hit.point.clone().addScaledVector(up, foot);
           if (vr > -7) {
             const inv = a.obj.matrixWorld.clone().invert();
-            free.landed = { body: a, local: a.obj.worldToLocal(land.clone()), localUp: up.clone().transformDirection(inv) };
+            free.landed = { body: a, ground: a.obj.worldToLocal(hit.point.clone()), localUp: up.clone().transformDirection(inv) };
             free.vel.set(0, 0, 0);
             free.pos.copy(land);
-            hint(`Posé sur ${a.name}${hit.water ? ' (en mer)' : ''} · E : sortir le véhicule · Espace : décoller`, 8);
+            hint(`Posé sur ${a.name}${hit.water ? ' (en mer)' : ''} · E : sortir à pied · Espace : décoller`, 8);
           } else {
             free.pos.copy(land);
             free.vel.addScaledVector(hit.radial, -1.6 * vr).multiplyScalar(0.5);
@@ -1534,15 +1643,15 @@ function updateFree(dt) {
     document.getElementById('eyepiece').classList.remove('on');
     document.body.classList.remove('in-scope');
   } else {
-    const camWant = free.pos.clone().add(new THREE.Vector3(0, dist * 0.3, -dist).applyQuaternion(qLook));
-    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, dist * 0.1, dist * 0.8).applyQuaternion(qLook)), camUp);
+    const camWant = free.pos.clone().add(new THREE.Vector3(0, dist * 0.62, -dist * 0.82).applyQuaternion(qLook));
+    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, dist * 0.05, dist * 0.45).applyQuaternion(qLook)), camUp);
   }
   freeHud(dt, boost);
 }
 
 // Caméra de poursuite, compensée du mouvement de l'astre de référence pour éviter les tremblements
 function followCamera(dt, want, target, up) {
-  const ref = free.rover ? free.rover.body : free.landed ? free.landed.body : free.anchor;
+  const ref = free.landed ? free.landed.body : free.anchor;
   if (ref && free.lastRef === ref) free.camPos.add(bodyCenter(ref).sub(free.lastRefPos));
   free.lastRef = ref;
   free.lastRefPos = ref ? bodyCenter(ref) : null;
@@ -1555,96 +1664,80 @@ function followCamera(dt, want, target, up) {
   document.body.classList.remove('in-scope');
 }
 
-// Véhicule tout-terrain amphibie : il roule sur le relief réel et flotte sur l'eau
-function updateRover(dt) {
-  const r = free.rover, b = r.body, obj = b.obj, k = free.keys;
-  const R = bodyRadius(b);
-  const pos = obj.localToWorld(r.local.clone());
-  const fwd = r.localFwd.clone().transformDirection(obj.matrixWorld);
-  const c = bodyCenter(b);
-  let up = pos.clone().sub(c).normalize();
-  const throttle = (k.has('fwd') || k.has('pu') ? 1 : 0) - (k.has('back') || k.has('pd') ? 1 : 0);
-  const steer = (k.has('left') || k.has('yl') ? 1 : 0) - (k.has('right') || k.has('yr') ? 1 : 0);
-  const vmax = THREE.MathUtils.clamp(R * 0.25, 0.3, 2.5) * (k.has('boost') ? 1.8 : 1);
-  r.speed += throttle * vmax * 1.4 * dt;
-  r.speed *= Math.exp(-dt * (throttle ? 0.4 : 2.2));
-  r.speed = THREE.MathUtils.clamp(r.speed, -vmax * 0.5, vmax);
-  const grip = Math.min(1, Math.abs(r.speed) / (vmax * 0.25) + 0.25);
-  fwd.applyAxisAngle(up, steer * 1.7 * dt * grip * (r.speed < 0 ? -1 : 1));
-  const prev = pos.clone();
-  const step = r.speed * dt;
-  // Obstacles (bâtiments, arbres, fusée) : on regarde devant les roues avant d'avancer
-  terrainMeshes(b);
-  let blocked = false;
-  if (Math.abs(step) > 1e-6 && b.obstacleMeshes.length) {
-    const dir = fwd.clone().multiplyScalar(Math.sign(step));
-    groundRay.set(pos.clone().addScaledVector(up, r.scale * 0.3), dir);
-    groundRay.far = Math.abs(step) + r.scale * 0.65;
-    if (groundRay.intersectObjects(b.obstacleMeshes, false).length) blocked = true;
-  }
-  if (!blocked) pos.addScaledVector(fwd, step);
-  // Suivi du sol : uniquement le terrain, jamais les toits ni les murs
-  let hit = groundHit(b, pos, true);
-  if (hit && !blocked) {
-    // Pente trop forte (plus de 40°) ou marche trop haute : le véhicule ne passe pas
-    const slope = hit.normal.dot(hit.radial);
-    const rise = hit.point.distanceTo(c) - prev.distanceTo(c);
-    if (slope < Math.cos(THREE.MathUtils.degToRad(40)) || rise > Math.max(Math.abs(step) * 0.85, r.scale * 0.12)) {
-      blocked = true;
-      pos.copy(prev);
-      hit = groundHit(b, pos, true);
-    }
-  }
-  if (blocked) {
-    r.speed *= -0.25;
-    if (hintTimer <= 0) hint('Le véhicule ne peut pas franchir cet obstacle', 1.5);
-  }
-  let water = false;
-  if (hit) {
-    // Collé à la surface : l'assiette suit le sol mais reste proche de la verticale locale
-    up = hit.radial.clone().lerp(hit.normal, 0.35).normalize();
-    pos.copy(hit.point);
-    water = hit.water;
-    if (water) pos.addScaledVector(hit.radial, r.scale * (0.12 + Math.sin(simTime * 3) * 0.03));
-  }
-  fwd.addScaledVector(up, -fwd.dot(up)).normalize();
-  rover.position.copy(pos);
-  mTmp.makeBasis(up.clone().cross(fwd).normalize(), up, fwd);
-  qTmp.setFromRotationMatrix(mTmp);
-  rover.quaternion.slerp(qTmp, Math.min(1, dt * 10));
-  rover.userData.roll(r.speed * dt / r.scale);
-  const inv = obj.matrixWorld.clone().invert();
-  r.local.copy(obj.worldToLocal(pos.clone()));
-  r.localFwd.copy(fwd.clone().transformDirection(inv));
-  // Le vaisseau reste posé là où on l'a laissé
+// Exploration à pied (vue subjective)
+const wEye = new THREE.Vector3(), wLook = new THREE.Vector3(), wUp = new THREE.Vector3();
+const lookIn = { yaw: 0, pitch: 0 };
+function updateWalker(dt) {
+  const w = free.walker, b = w.body, W = b.walk, obj = b.obj, k = free.keys;
+  // Le vaisseau reste posé (moteurs éteints)
   if (free.landed) {
     const L = free.landed;
-    ship.position.copy(L.body.obj.localToWorld(L.local.clone()));
-    ship.userData.setThrust(0, simTime);
+    const up = L.localUp.clone().transformDirection(obj.matrixWorld);
+    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, 0.9 * free.shipScale);
+    ship.position.copy(free.pos);
   }
-  autoThrust = Math.abs(r.speed) / vmax;
-  const dist = r.scale * 9 * (free.dist / 8);
-  const qLook = new THREE.Quaternion().setFromAxisAngle(up, user.yaw);
-  const back = fwd.clone().applyQuaternion(qLook);
-  if (views.free === 'fpv') {
-    // Au volant : la caméra est dans la cabine du véhicule
-    rover.visible = false;
-    camera.position.copy(pos).addScaledVector(up, r.scale * 1.1).addScaledVector(fwd, r.scale * 0.3);
-    camera.up.copy(up);
-    camera.lookAt(camera.position.clone().addScaledVector(back, r.scale * 10).addScaledVector(up, -r.scale * (1 + user.pitch * 4)));
-    free.camPos.copy(camera.position);
-    free.lastRef = null;
-  } else {
-    rover.visible = true;
-    const want = pos.clone().addScaledVector(back, -dist).addScaledVector(up, dist * (0.75 + user.pitch * 0.4));
-    followCamera(dt, want, pos.clone().addScaledVector(back, r.scale * 3).addScaledVector(up, r.scale * 0.6), up);
+  ship.visible = true;
+  ship.userData.setThrust(0, simTime);
+  autoThrust = 0;
+  pushTrail(ship.position, 0);
+  if (w.scope && tele) {
+    // Dans la grande lunette : la caméra est à l'objectif et vise l'amas
+    const pos = tele.eye.getWorldPosition(new THREE.Vector3());
+    camera.position.copy(pos);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(pos.clone().addScaledVector(OMEGA_DIR, 100));
+    camera.near = 0.05; camera.updateProjectionMatrix();
+    sky.visible = false;
+    const ep = document.getElementById('eyepiece');
+    ep.classList.add('on');
+    document.body.classList.add('in-scope');
+    const Wd = window.innerWidth, H = window.innerHeight, d = Math.min(H * 0.78, Wd * 0.7);
+    ep.style.setProperty('--ex', `${Wd / 2}px`); ep.style.setProperty('--ey', `${H / 2}px`);
+    ep.style.setProperty('--ed', `${d}px`); ep.style.setProperty('--ei', `${H / 2 + d / 2 + 6}px`);
+    viewOffset.tx = viewOffset.ty = 0;
+    applyProjection(dt, 3.2);
+    if (k.has('fwd') || k.has('back') || k.has('left') || k.has('right')) { w.scope = false; hint('', 0); }
+    return;
   }
-  document.getElementById('free-speed').textContent = `Véhicule sur ${b.name}${water ? ' · navigation' : ''} · ${fmt(Math.abs(r.speed) / r.scale * 4, 1)} km/h`;
+  const input = {
+    fwd: (k.has('fwd') ? 1 : 0) - (k.has('back') ? 1 : 0),
+    strafe: (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0),
+    run: k.has('boost'), jump: k.has('up'),
+    yaw: ((k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0)) * 2.0 * dt + lookIn.yaw,
+    pitch: ((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0)) * 1.4 * dt + lookIn.pitch,
+  };
+  lookIn.yaw = lookIn.pitch = 0;
+  stepWalker(w, W, input, Math.min(dt, 0.05));
+  walkerView(w, W, wEye, wLook, wUp);
+  obj.localToWorld(wEye); obj.localToWorld(wLook);
+  wUp.transformDirection(obj.matrixWorld);
+  camera.position.copy(wEye);
+  camera.up.copy(wUp);
+  camera.lookAt(wLook);
+  // Plan de coupe proche à l'échelle du personnage, pour voir les intérieurs
+  const wpm = W.m2u * obj.getWorldScale(tmpV).x;
+  camera.near = Math.max(1e-4, 0.08 * wpm);
+  camera.updateProjectionMatrix();
+  free.camPos.copy(camera.position);
+  free.lastRef = null;
+  sky.visible = true;
+  document.getElementById('eyepiece').classList.remove('on');
+  document.body.classList.remove('in-scope');
+  viewOffset.tx = viewOffset.ty = 0;
+  // Indications
+  if (hintTimer <= 0) {
+    const shipLocal = obj.worldToLocal(ship.position.clone());
+    if (nearScope(w)) hint('E : regarder dans la grande lunette', 0.3);
+    else if (shipLocal.distanceTo(w.p) < 12 * W.m2u) hint('E : remonter à bord du vaisseau', 0.3);
+    else if (w.swim) hint('À la nage', 0.3);
+  }
+  const sp = w.v.length() / W.m2u;
+  document.getElementById('free-speed').textContent = `${sp.toFixed(1)} m/s · à pied sur ${b.name}`;
+  if (free.near !== b) { free.near = b; showBody(b); }
   updateTargetMarker();
-  applyProjection(dt, 55);
+  applyProjection(dt, 70);
 }
 
-// Proximité, vitesse, repère de cible
 function freeHud(dt, boost) {
   const near = findNear(free.pos);
   if (near !== free.near) {
@@ -1800,7 +1893,7 @@ function updateLabels() {
   for (const b of BODIES) {
     const el = b.label;
     let show = false;
-    if (ready && current && !overlayOpen && b.obj && !current.telescope) {
+    if (ready && current && !overlayOpen && b.obj && !current.telescope && !(mode === 'free' && free.walker)) {
       if (current.kind === 'star') show = b.kind !== 'moon';
       else show = b === g || b.parent === g || (b.kind !== 'moon' && b !== g);
     }
@@ -1878,6 +1971,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyV' && !e.ctrlKey) { toggleView(); return; }
   if (mode === 'free') {
     if (e.code === 'KeyE') { freeAction(); return; }
+    if (e.code === 'Escape' && free.walker?.scope) { free.walker.scope = false; return; }
     if (e.ctrlKey) free.keys.add('ctrl');
     const k = KEYMAP[e.code];
     if (k) { e.preventDefault(); free.keys.add(k); }
@@ -1908,6 +2002,10 @@ canvas.addEventListener('pointerdown', (e) => {
     const k = cockpit.keyAt(e.clientX, e.clientY);
     if (k) { cockpit.press(k); if (k.action) cockpitAction(k.action); pointer.skip = true; return; }
   }
+  // À pied, un clic capture la souris pour regarder librement (Échap pour la libérer)
+  if (mode === 'free' && free.walker && e.pointerType === 'mouse' && document.pointerLockElement !== canvas) {
+    canvas.requestPointerLock?.();
+  }
   pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY; pointer.moved = 0; pointer.id = e.pointerId;
   canvas.setPointerCapture(e.pointerId);
 });
@@ -1920,7 +2018,11 @@ canvas.addEventListener('pointermove', (e) => {
   const dx = e.clientX - pointer.x, dy = e.clientY - pointer.y;
   pointer.moved += Math.abs(dx) + Math.abs(dy);
   pointer.x = e.clientX; pointer.y = e.clientY;
-  if (mode === 'free' && e.pointerType === 'touch' && !free.rover) {
+  if (mode === 'free' && free.walker) {
+    lookIn.yaw -= dx * 0.004; lookIn.pitch -= dy * 0.004;
+    return;
+  }
+  if (mode === 'free' && e.pointerType === 'touch') {
     // Sur écran tactile, glisser oriente directement le vaisseau
     free.touchRot.x -= dx * 0.08;
     free.touchRot.y -= dy * 0.08;
@@ -1930,6 +2032,11 @@ canvas.addEventListener('pointermove', (e) => {
   if (mode === 'free') user.tPitch = THREE.MathUtils.clamp(user.tPitch - dy * 0.004, -1.2, 1.2);
   else user.tPitch = THREE.MathUtils.clamp(user.tPitch + dy * 0.004, -1.1, 1.0);
   canvas.style.cursor = 'grabbing';
+});
+document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement !== canvas || !free.walker) return;
+  lookIn.yaw -= e.movementX * 0.0022;
+  lookIn.pitch -= e.movementY * 0.0022;
 });
 canvas.addEventListener('pointerup', (e) => {
   if (pointer.skip) { pointer.skip = false; return; }
@@ -2052,7 +2159,27 @@ function onModelError(err) {
   console.error(err);
   ui.loaderPct.textContent = 'Impossible de charger le système.';
 }
-if (location.search.includes('debug')) window.__debug = { spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship };
+// Test : déposer le personnage sur un astre, en un point du repère local (ou dans une direction)
+function debugWalk(id, x, y, z, yaw = 0, pitch = -0.1) {
+  const b = byId[id];
+  if (!b?.walk) return 'pas de données';
+  if (mode !== 'free') setMode('free');
+  const W = b.walk;
+  const p = new THREE.Vector3(x, y, z);
+  const dir = p.clone().sub(W.center).normalize();
+  if (p.distanceTo(W.center) < W.R * 0.5) { const q = {}; W.sampler.query(dir, q); p.copy(W.center).addScaledVector(dir, q.r + 0.2 * W.m2u); }
+  // Le vaisseau se pose à côté
+  const q = {}; const sd = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0).cross(dir).normalize(), 30 * W.m2u / W.R);
+  W.sampler.query(sd, q);
+  const inv = new THREE.Matrix4().copy(b.obj.matrixWorld).invert();
+  free.landed = { body: b, ground: W.center.clone().addScaledVector(sd, q.r), localUp: sd.clone() };
+  free.anchor = b;
+  const t = new THREE.Vector3(1, 0, 0).addScaledVector(dir, -dir.x).normalize().applyAxisAngle(dir, yaw);
+  free.walker = { body: b, p, v: new THREE.Vector3(), heading: t, pitch, onGround: false, swim: false, scope: false };
+  syncLayout();
+  return W.m2u;
+}
+if (location.search.includes('debug')) window.__debug = { spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship, debugWalk, keys: free.keys, placeShipAtBase, launchSite };
 const gltfLoader = new GLTFLoader();
 if (window.__PLANETARIUM_GLB__) {
   // Modèle embarqué en base64 (version aperçu hébergée sans fichier .glb)

@@ -902,3 +902,8 @@ body.free #hud-nav { display: none; }
   .ember, .loop-sun { animation: none; }
   .panel-body.reveal > * { animation: none; }
 }
+
+/* À pied : l'aide du vol est remplacée par un rappel des commandes de marche */
+body.walking #free-help { display: none; }
+body.walking #free-speed::after { content: ' · ZQSD marcher · souris regarder · Espace sauter · Maj courir · E agir'; opacity: 0.7; }
+body.walking.in-scope #free-speed, body.walking.in-scope #free-hint { display: none; }

@@ -1,11 +1,13 @@
 // Lunes-monuments : les lieux d'études et l'observatoire de Meudon, posés sur un sol sphérique.
 // Chaque bâtiment est construit à plat dans un « structure() », puis drapé sur la lune :
 // il suit la normale de la sphère, et des fondations comblent l'écart dû à la courbure.
+// Les bâtiments sont creux et aménagés (portes, escaliers, planchers, mobilier) : on peut y entrer à pied.
 import * as THREE from 'three';
 import {
-  mulberry32, fbm3, mat, glow, add, box, cyl, cone, gableRoof, mansardRoof, windows, tree, pine,
+  mulberry32, fbm3, mat, glow, add, box, cyl, cone, gableRoof, mansardRoof, tree, pine,
   grandPiano, glenoidImplant,
 } from './models.js';
+import { Kit, kitOf, hollow, faceBands, facadeWindows, M } from './kit.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -28,21 +30,28 @@ function structure(g, x, z, rotY = 0, plinth = true) {
   g.add(s);
   return s;
 }
+// Arbre avec tronc infranchissable
+function treeAt(g, x, z, s = 1, color = 0x4c7a3d) {
+  const t = structure(g, x, z, 0, false);
+  tree(t, 0, 0, 0, s, color);
+  t.userData.colliders = { boxes: [], cyls: [[0, 0, 0.035 * s, -0.05, 0.3 * s]], rings: [] };
+  return t;
+}
 
-// Aile de bâtiment classique, longueur selon X local, façade principale vers +Z
-function wing(s, { len, depth, h, floors, wall = C.stone, roof = C.slate, roofH = 0.3, mansard = true, dormersN = 0, x = 0, z = 0, lit = true }) {
-  box(s, len, h, depth, mat(wall), x, 0, z);
-  // Bandeau et corniche
-  box(s, len + 0.03, 0.035, depth + 0.03, mat(0xf6f0e2), x, h - 0.035, z);
-  box(s, len + 0.02, 0.05, depth + 0.02, mat(0xcfc2a6), x, 0, z);
+// Aile de bâtiment classique, longueur selon X local, façade principale vers +Z.
+// Creuse : portes au centre des deux façades, escaliers, planchers, salles meublées.
+function wing(s, { len, depth, h, floors, wall = C.stone, roof = C.slate, roofH = 0.3, mansard = true, dormersN = 0, x = 0, z = 0, lit = true, furnish = 'school', doors = { '+z': 0, '-z': 0 }, seed = 1 }) {
+  const k = kitOf(s);
+  hollow(k, { w: len, d: depth, h, x, z, floors, wall, doors, furnish, seed, inner: 0xf1e9d8 });
+  // Corniche
+  faceBands(k, len, depth, x, z, h - 0.035, 0.035, 0xf6f0e2, { out: 0.012 });
   if (mansard) mansardRoof(s, len, roofH, depth, mat(roof), x, h, z);
   else gableRoof(s, len, roofH, depth, mat(roof), x, h, z);
-  const cols = Math.max(2, Math.round(len / 0.19));
-  const wm = lit ? glow(LIT, 1.4) : mat(0x2a2f38);
-  const dy = (h - 0.12) / floors;
-  const g = new THREE.Group(); g.position.x = x; s.add(g);
-  windows(g, { w: len - 0.12, rows: floors, cols, y0: 0.1 + dy * 0.35, dy, z: z + depth / 2 + 0.005, h: dy * 0.5, ww: 0.065, m: wm });
-  windows(g, { w: len - 0.12, rows: floors, cols, y0: 0.1 + dy * 0.35, dy, z: z - depth / 2 - 0.005, h: dy * 0.5, ww: 0.065, m: wm });
+  // Fenêtres éclairées (sauf au droit des portes)
+  const fh = h / floors, cols = Math.max(2, Math.round(len / 0.19));
+  const skip = (side) => (a, f) => f === 0 && doors[side] !== undefined && Math.abs(a - doors[side]) < 0.09;
+  facadeWindows(k, { w: len - 0.12, x, z: z + depth / 2, y0: 0, floors, fh, cols, side: 1, ww: 0.065, wh: fh * 0.45, lit: lit ? LIT : 0x2a2f38, skip: skip('+z') });
+  facadeWindows(k, { w: len - 0.12, x, z: z - depth / 2, y0: 0, floors, fh, cols, side: -1, ww: 0.065, wh: fh * 0.45, lit: lit ? LIT : 0x2a2f38, skip: skip('-z') });
   // Lucarnes
   for (let i = 0; i < dormersN; i++) {
     const dx = x - len / 2 + (len / dormersN) * (i + 0.5);
@@ -55,8 +64,10 @@ function wing(s, { len, depth, h, floors, wall = C.stone, roof = C.slate, roofH 
   }
   return s;
 }
-
-// Fronton triangulaire (face +Z)
+// Avant-corps en saillie devant une façade : un porche creux qui s'ouvre sur la porte de l'aile
+function porch(s, { w, d, h, z, wall, doorW = 0.12, doorH = 0.22, furnish = 'none' }) {
+  hollow(kitOf(s), { w, d, h, x: 0, z, floors: 1, wall, open: ['-z'], doors: { '+z': 0 }, doorW, doorH, furnish, lamps: true });
+}
 function pediment(s, w, h, depth, color, x, y, z) {
   const sh = new THREE.Shape();
   sh.moveTo(-w / 2, 0); sh.lineTo(w / 2, 0); sh.lineTo(0, h); sh.closePath();
@@ -100,9 +111,12 @@ function sphereBand(R, r1, r2, color, lift = 0.006, seg = 72) {
 // Drapé sur la sphère
 // ---------------------------------------------------------------------------
 const tmpBox = new THREE.Box3();
+const plinthMat = mat(0x9d927f);
 function drape(group, R) {
   for (const c of [...group.children]) {
     if (c.userData.noDrape) continue;
+    // Les bâtiments du kit sont assemblés avant de mesurer leur emprise
+    if (c.userData.kit) { c.userData.kit.build(c); delete c.userData.kit; }
     const { x, z } = c.position;
     const y0 = c.position.y;
     if (c.userData.plinth) {
@@ -115,8 +129,30 @@ function drape(group, R) {
       const hx = Math.max(Math.abs(tmpBox.min.x), Math.abs(tmpBox.max.x));
       const hz = Math.max(Math.abs(tmpBox.min.z), Math.abs(tmpBox.max.z));
       const sag = (hx * hx + hz * hz) / (2 * R) + 0.1;
-      const w = tmpBox.max.x - tmpBox.min.x + 0.06, d = tmpBox.max.z - tmpBox.min.z + 0.06;
-      box(c, w, sag, d, mat(0x9d927f), (tmpBox.min.x + tmpBox.max.x) / 2, -sag + 0.01, (tmpBox.min.z + tmpBox.max.z) / 2);
+      const x0 = tmpBox.min.x - 0.03, x1 = tmpBox.max.x + 0.03, z0 = tmpBox.min.z - 0.03, z1 = tmpBox.max.z + 0.03;
+      const k = new Kit();
+      // Socle praticable : son dessus prolonge le sol des bâtiments, ses flancs plongent dans la lune
+      k.box(x1 - x0, sag + 0.01, z1 - z0, (x0 + x1) / 2, -sag, (z0 + z1) / 2, 0x9d927f);
+      // Perrons : marches qui descendent de chaque porte jusqu'au sol
+      for (const d of c.userData.doors || []) {
+        if (Math.abs(d.y) > 1e-3) continue;
+        const ox = d.x + d.nx * 0.03, oz = d.z + d.nz * 0.03;
+        // Sol de la lune sous le plan tangent du bâtiment : y ≈ 0,007 − ρ² / 2R
+        const ex = ox + d.nx * M(1.5), ez = oz + d.nz * M(1.5);
+        const drop = 0.003 + (ex * ex + ez * ez) / (2 * R);
+        const rise = M(0.18), run = M(0.32);
+        const n = Math.ceil(drop / rise);
+        if (n <= 1) continue;
+        for (let i = 0; i < n; i++) {
+          const top = 0.01 - ((i + 1) * drop) / n;
+          const e = i * run + run / 2;
+          const sx = ox + d.nx * e, sz = oz + d.nz * e;
+          const ww = d.w + M(1.2);
+          if (d.nx) k.box(run, 0.12, ww, sx, top - 0.12, sz, 0xb8ad98);
+          else k.box(ww, 0.12, run, sx, top - 0.12, sz, 0xb8ad98);
+        }
+      }
+      k.build(c);
     }
     const n = new THREE.Vector3(x, Math.sqrt(Math.max(R * R - x * x - z * z, 0.01)), z).normalize();
     c.position.copy(n).multiplyScalar(R + y0 - 0.004);
@@ -164,7 +200,8 @@ function createMoon({ radius, seed, colors, cap = 0.62 }) {
   return m;
 }
 
-// Assemble lune + pelouse + monument drapé + quelques rochers et arbres épars
+
+// Assemble lune + pelouse + monument drapé (le reste de la lune est peuplé ensuite, voir cover.js)
 export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, ground = C.grass, cap = 0.62 }) {
   const moon = new THREE.Group();
   moon.add(createMoon({ radius, seed, colors, cap }));
@@ -188,19 +225,8 @@ export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, gro
   const lm = landmark(radius);
   drape(lm, radius);
   moon.add(lm);
-  // Végétation éparse hors de la calotte
-  const rnd = mulberry32(seed * 13);
-  for (let i = 0; i < 14; i++) {
-    const d = new THREE.Vector3(rnd() - 0.5, rnd() * 0.9 - 0.2, rnd() - 0.5).normalize();
-    if (d.y > Math.cos(cap) - 0.05) continue;
-    const t = new THREE.Group();
-    if (rnd() < 0.6) pine(t, 0, 0, 0, 1.2 + rnd() * 0.8, 0x3b5e3a);
-    else add(t, new THREE.IcosahedronGeometry(0.12 + rnd() * 0.15, 0), mat(0x8a8175), 0, 0.03, 0);
-    t.position.copy(d).multiplyScalar(radius * 0.985);
-    t.quaternion.setFromUnitVectors(UP, d);
-    moon.add(t);
-  }
   moon.userData.topY = radius;
+  moon.userData.cap = cap;
   return moon;
 }
 
@@ -215,47 +241,49 @@ export function lyceeCorneille(R = 4) {
   const court = sphereBand(R, 0, 0.75, 0xd9cfba, 0.004);
   court.userData.noDrape = true;
   g.add(court);
-  wing(structure(g, 0.15, -0.8), { len: 2.4, depth: 0.5, h: 0.82, floors: 3, dormersN: 8 });
-  wing(structure(g, 1.15, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4 });
-  wing(structure(g, -0.85, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4 });
+  const main = wing(structure(g, 0.15, -0.8), { len: 2.4, depth: 0.5, h: 0.82, floors: 3, dormersN: 8, furnish: 'school', seed: 2 });
+  wing(structure(g, 1.15, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4, furnish: 'library', seed: 3 });
+  wing(structure(g, -0.85, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4, furnish: 'school', seed: 4 });
   // Cheminées
-  const n = g.children[0];
-  for (const x of [-0.9, 0, 0.9]) box(n, 0.08, 0.2, 0.08, mat(0xb9ad95), x, 1.0, 0);
+  for (const x of [-0.9, 0, 0.9]) box(main, 0.08, 0.2, 0.08, mat(0xb9ad95), x, 1.0, 0);
 
-  // Chapelle Saint-Louis (façade au sud, vers +Z)
+  // Chapelle Saint-Louis (façade au sud, vers +Z) : nef creuse avec bancs et autel
   const ch = structure(g, -1.75, 0.3);
-  box(ch, 0.56, 1.05, 1.3, mat(C.stone), 0, 0, -0.1);
+  const k = kitOf(ch);
+  hollow(k, { w: 0.56, d: 1.3, h: 1.05, x: 0, z: -0.1, floors: 1, wall: C.stone, inner: 0xf4efe4, open: ['+z'], doors: {}, furnish: 'church', floorCol: 0xb9a888, seed: 5 });
   gableRoof(ch, 1.3, 0.42, 0.56, mat(C.slate), 0, 1.05, -0.1).rotation.y = Math.PI / 2;
   for (const zz of [-0.55, -0.2, 0.15]) for (const sx of [1, -1]) {
     const side = new THREE.Group(); side.position.set(sx * 0.285, 0, zz); side.rotation.y = sx * Math.PI / 2; ch.add(side);
     arch(side, 0.1, 0.35, mat(0x2b3240), 0, 0.45, 0);
   }
   const F = 0.57; // plan de la façade
-  box(ch, 0.8, 0.72, 0.1, mat(C.white), 0, 0, F);
+  // Façade basse percée d'une grande porte en plein cintre
+  const DW = 0.14, DH = 0.26;
+  k.box((0.8 - DW) / 2, 0.72, 0.1, -(0.8 + DW) / 4, 0, F, C.white);
+  k.box((0.8 - DW) / 2, 0.72, 0.1, (0.8 + DW) / 4, 0, F, C.white);
+  k.box(DW, 0.72 - DH, 0.1, 0, DH, F, C.white);
+  add(ch, new THREE.CylinderGeometry(DW / 2, DW / 2, 0.02, 12, 1, false, -Math.PI / 2, Math.PI), mat(0x3b2b20), 0, DH, F + 0.051, [Math.PI / 2, 0, 0]);
   box(ch, 0.84, 0.06, 0.13, mat(C.stoneLight), 0, 0.72, F);
   for (const x of [-0.33, -0.18, 0.18, 0.33]) cyl(ch, 0.028, 0.03, 0.66, 10, mat(0xfbf7ee), x, 0.02, F + 0.07);
-  arch(ch, 0.16, 0.42, mat(0x3b2b20), 0, 0.04, F + 0.06);
   box(ch, 0.5, 0.45, 0.1, mat(C.white), 0, 0.78, F);
   for (const x of [-0.2, 0.2]) cyl(ch, 0.022, 0.025, 0.4, 10, mat(0xfbf7ee), x, 0.8, F + 0.07);
   arch(ch, 0.16, 0.3, glow(0xffcf8a, 1.0), 0, 0.84, F + 0.06);
-  // Ailerons à volutes
   for (const sx of [1, -1]) {
     const v = add(ch, new THREE.CylinderGeometry(0.15, 0.15, 0.08, 12, 1, false, 0, Math.PI / 2), mat(C.white), sx * 0.25, 0.78, F);
     v.rotation.set(Math.PI / 2, 0, sx > 0 ? 0 : -Math.PI / 2);
   }
   box(ch, 0.54, 0.05, 0.13, mat(C.stoneLight), 0, 1.23, F);
   pediment(ch, 0.56, 0.2, 0.1, C.white, 0, 1.28, F - 0.05);
-  // Statues sur les corniches : saint Louis, Charlemagne, Ignace de Loyola, François d'Assise
   for (const [x, y] of [[-0.34, 0.78], [0.34, 0.78], [-0.22, 1.28], [0.22, 1.28]]) statue(ch, x, y, F + 0.02, 0xf4efe4, 0.9);
-  // Escalier monumental
-  for (let i = 0; i < 3; i++) box(ch, 0.6 - i * 0.06, 0.03, 0.09, mat(0xd9d0bf), 0, i * 0.03, F + 0.16 - i * 0.05);
+  // Seuil ; l'escalier monumental est le perron généré au drapé
+  k.box(DW, 0.012, 0.12, 0, 0, F, 0xb9a888);
+  ch.userData.doors = [{ x: 0, z: F + 0.05, nx: 0, nz: 1, w: 0.5, y: 0 }];
 
   // Statue de Pierre Corneille dans la cour
   const st = structure(g, 0.15, 0.1);
-  box(st, 0.16, 0.16, 0.16, mat(0xd4cab5), 0, 0, 0);
+  kitOf(st).box(0.16, 0.16, 0.16, 0, 0, 0, 0xd4cab5);
   statue(st, 0, 0.16, 0, C.bronze, 1.6);
-  // Arbres
-  for (const [x, z, s] of [[1.75, 0.9, 1.2], [0.7, 1.25, 1], [-0.45, 1.3, 1.1], [1.8, -1.0, 1.1], [-1.3, -1.1, 1]]) tree(structure(g, x, z, 0, false), 0, 0, 0, s, 0x4c7a3d);
+  for (const [x, z, s] of [[1.75, 0.9, 1.2], [0.7, 1.25, 1], [-0.45, 1.3, 1.1], [1.8, -1.0, 1.1], [-1.3, -1.1, 1]]) treeAt(g, x, z, s, 0x4c7a3d);
   return g;
 }
 
@@ -268,62 +296,58 @@ export function abbayeCluny() {
   const g = new THREE.Group();
   const stone = mat(C.stoneWarm), dark = mat(0x221d18);
   const t = structure(g, -0.25, -0.35);
-  box(t, 1.9, 1.5, 0.62, stone, 0, 0, 0);
+  hollow(kitOf(t), { w: 1.9, d: 0.62, h: 1.5, floors: 1, wall: C.stoneWarm, inner: 0xe8dcc0, doors: { '+z': 0.225 }, doorW: 0.1, doorH: 0.2, furnish: 'church', floorCol: 0xb5a180, seed: 6 });
   gableRoof(t, 1.9, 0.48, 0.62, mat(C.tile), 0, 1.5, 0);
   // Contreforts et baies romanes
-  for (const x of [-0.9, -0.45, 0, 0.45, 0.9]) for (const sz of [1, -1]) box(t, 0.09, 1.15, 0.1, stone, x, 0, sz * 0.34);
+  for (const x of [-0.9, -0.45, 0, 0.45, 0.9]) for (const sz of [1, -1]) kitOf(t).box(0.09, 1.15, 0.1, x, 0, sz * 0.34, C.stoneWarm);
   for (const x of [-0.68, -0.22, 0.22, 0.68]) for (const sz of [1, -1]) {
     arch(t, 0.12, 0.3, dark, x, 0.35, sz * 0.315);
     arch(t, 0.1, 0.24, dark, x, 0.95, sz * 0.315);
   }
-  // Absidiole (côté est)
   add(t, new THREE.CylinderGeometry(0.26, 0.26, 0.75, 14, 1, false, Math.PI / 2, Math.PI), stone, 0.55, 0.375, -0.31);
   add(t, new THREE.ConeGeometry(0.28, 0.25, 14, 1, false, Math.PI / 2, Math.PI), mat(C.tile), 0.55, 0.875, -0.31);
   // Clocher de l'Eau-Bénite
   const c = new THREE.Group(); c.position.set(0.1, 1.5, 0); t.add(c);
   box(c, 0.66, 0.62, 0.66, stone, 0, 0, 0);
-  const tiers = [[0.62, 0.44, 0.38], [1.12, 0.4, 0.34]];
-  for (const [y, h, r] of tiers) {
+  for (const [y, h, r] of [[0.62, 0.44, 0.38], [1.12, 0.4, 0.34]]) {
     cyl(c, r + 0.04, r + 0.04, 0.05, 8, mat(0xe2d2b2), 0, y - 0.05, 0);
     cyl(c, r, r, h, 8, stone, 0, y, 0);
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-      const fx = Math.sin(a) * r * 0.93, fz = Math.cos(a) * r * 0.93;
-      const face = new THREE.Group(); face.position.set(fx, y, fz); face.rotation.y = a; c.add(face);
-      // Baies géminées sous arcade
+      const face = new THREE.Group(); face.position.set(Math.sin(a) * r * 0.93, y, Math.cos(a) * r * 0.93); face.rotation.y = a; c.add(face);
       arch(face, 0.07, h * 0.62, dark, -0.045, h * 0.18, 0.005);
       arch(face, 0.07, h * 0.62, dark, 0.045, h * 0.18, 0.005);
-      const ca = Math.sin(a + Math.PI / 8) * r, cz = Math.cos(a + Math.PI / 8) * r;
-      cyl(c, 0.018, 0.018, h, 6, mat(0xe8dcc0), ca, y, cz);
+      cyl(c, 0.018, 0.018, h, 6, mat(0xe8dcc0), Math.sin(a + Math.PI / 8) * r, y, Math.cos(a + Math.PI / 8) * r);
     }
   }
   cyl(c, 0.38, 0.38, 0.05, 8, mat(0xe2d2b2), 0, 1.52, 0);
   cone(c, 0.37, 0.95, 8, mat(0x6b6a6c), 0, 1.57, 0);
   add(c, new THREE.SphereGeometry(0.03, 6, 5), mat(C.gold), 0, 2.55, 0);
-  // Tour de l'Horloge
+  // Tour de l'Horloge : escalier à vis jusqu'à la salle du mécanisme
   const h = structure(g, 1.05, 0.15);
-  box(h, 0.42, 1.75, 0.42, stone, 0, 0, 0);
-  for (const y of [0.5, 1.0]) box(h, 0.44, 0.03, 0.44, mat(0xe2d2b2), 0, y, 0);
-  for (const sz of [1, -1]) for (const y of [0.25, 0.7]) box(h, 0.05, 0.16, 0.02, dark, 0, y, sz * 0.215);
+  const kh = kitOf(h);
+  hollow(kh, { w: 0.42, d: 0.42, h: 1.75, floors: 2, stair: 'spiral', wall: C.stoneWarm, inner: 0xe0d2b4, furnish: 'observatory', seed: 7 });
+  for (const y of [0.5, 1.0]) faceBands(kh, 0.42, 0.42, 0, 0, y, 0.03, 0xe2d2b2, { out: 0.01, gap: { x0: -0.06, x1: 0.06, y1: 0.16 } });
+  for (const sz of [1, -1]) for (const y of [0.35, 0.7]) box(h, 0.05, 0.16, 0.02, dark, 0, y, sz * 0.215);
   add(h, new THREE.CylinderGeometry(0.1, 0.1, 0.02, 20), glow(0xffe6b0, 1.2), 0, 1.45, 0.22, [Math.PI / 2, 0, 0]);
   cone(h, 0.33, 0.5, 4, mat(C.tile), 0, 1.75, 0, [0, Math.PI / 4, 0]);
-  // Bâtiments conventuels XVIIIe (campus Arts et Métiers)
+  // Bâtiments conventuels XVIIIe (campus Arts et Métiers), pavillon central en saillie
   const cv = structure(g, 0.05, 1.0);
-  wing(cv, { len: 2.5, depth: 0.5, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 9 });
-  box(cv, 0.5, 0.8, 0.56, mat(0xf2ebdc), 0, 0, 0);
-  pediment(cv, 0.52, 0.16, 0.06, 0xf2ebdc, 0, 0.8, 0.22);
+  wing(cv, { len: 2.5, depth: 0.5, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 9, furnish: 'workshop', seed: 8 });
+  porch(cv, { w: 0.5, d: 0.16, h: 0.8, z: 0.33, wall: 0xf2ebdc });
+  pediment(cv, 0.52, 0.16, 0.06, 0xf2ebdc, 0, 0.8, 0.35);
   // Farinier (XIIIe s.) : long bâtiment bas sous une très haute toiture de tuiles
   const fa = structure(g, -1.25, -1.15, 0.5);
-  box(fa, 1.1, 0.42, 0.42, stone, 0, 0, 0);
+  hollow(kitOf(fa), { w: 1.1, d: 0.42, h: 0.42, floors: 1, wall: C.stoneWarm, inner: 0xd8c8a6, doors: { '+z': 0.1 }, furnish: 'hall', seed: 9 });
   gableRoof(fa, 1.1, 0.42, 0.42, mat(C.tile), 0, 0.42, 0);
-  for (const x of [-0.4, -0.2, 0, 0.2, 0.4]) box(fa, 0.07, 0.36, 0.06, stone, x, 0, 0.23);
-  // Tour des Fromages : tour carrée élancée
+  for (const x of [-0.4, -0.2, 0, 0.2, 0.4]) kitOf(fa).box(0.07, 0.36, 0.06, x, 0, 0.24, C.stoneWarm);
+  // Tour des Fromages : tour carrée élancée, escalier à vis
   const tf = structure(g, 1.55, -0.95);
-  box(tf, 0.3, 1.25, 0.3, stone, 0, 0, 0);
-  for (const y of [0.4, 0.8]) box(tf, 0.05, 0.12, 0.02, dark, 0, y, 0.155);
-  box(tf, 0.34, 0.05, 0.34, mat(0xe2d2b2), 0, 1.25, 0);
+  hollow(kitOf(tf), { w: 0.32, d: 0.32, h: 1.25, floors: 2, stair: 'spiral', wall: C.stoneWarm, inner: 0xe0d2b4, furnish: 'none', seed: 10, doorW: 0.09 });
+  for (const y of [0.45, 0.85]) box(tf, 0.05, 0.12, 0.02, dark, 0, y, 0.165);
+  box(tf, 0.36, 0.05, 0.36, mat(0xe2d2b2), 0, 1.25, 0);
   cone(tf, 0.25, 0.25, 4, mat(C.tile), 0, 1.3, 0, [0, Math.PI / 4, 0]);
-  for (const [x, z, s] of [[-1.55, 0.3, 1.2], [1.7, 0.4, 1.1], [-0.2, -1.45, 1.0], [1.55, 0.9, 1.0]]) tree(structure(g, x, z, 0, false), 0, 0, 0, s, 0x4f7c3f);
+  for (const [x, z, s] of [[-1.55, 0.3, 1.2], [1.7, 0.4, 1.1], [-0.2, -1.45, 1.0], [1.55, 0.9, 1.0]]) treeAt(g, x, z, s, 0x4f7c3f);
   return g;
 }
 
@@ -335,46 +359,46 @@ export function abbayeCluny() {
 export function ensamParis() {
   const g = new THREE.Group();
   const f = structure(g, 0, 0.7);
-  wing(f, { len: 2.9, depth: 0.45, h: 0.95, floors: 4, wall: 0xe8ddc5, roof: C.zinc, roofH: 0.28, dormersN: 10 });
-  // Avant-corps
-  box(f, 0.72, 1.12, 0.56, mat(0xf0e7d3), 0, 0, 0.02);
-  for (const x of [-0.28, -0.1, 0.1, 0.28]) box(f, 0.05, 0.85, 0.03, mat(0xf8f2e4), x, 0.12, 0.31);
-  arch(f, 0.26, 0.5, glow(0xffc77d, 1.0), 0, 0.02, 0.31);
+  wing(f, { len: 2.9, depth: 0.45, h: 0.95, floors: 4, wall: 0xe8ddc5, roof: C.zinc, roofH: 0.28, dormersN: 10, furnish: 'school', seed: 11 });
+  // Avant-corps : porche creux, grande porte cintrée
+  porch(f, { w: 0.72, d: 0.18, h: 1.12, z: 0.315, wall: 0xf0e7d3, doorW: 0.15, doorH: 0.28 });
+  for (const x of [-0.28, -0.12, 0.12, 0.28]) box(f, 0.05, 0.85, 0.03, mat(0xf8f2e4), x, 0.12, 0.42);
+  arch(f, 0.26, 0.2, glow(0xffc77d, 1.0), 0, 0.3, 0.41);
   const sign = textPlane('ARTS ET MÉTIERS', 0.64, 0.09, { color: '#3a2a1c' });
-  sign.position.set(0, 1.02, 0.305); f.add(sign);
-  mansardRoof(f, 0.72, 0.34, 0.56, mat(C.zinc), 0, 1.12, 0.02);
-  // Drapeau tricolore
-  cyl(f, 0.008, 0.008, 0.4, 5, mat(0x333333), 0, 1.45, 0.02);
-  [0x1f3a93, 0xf5f5f5, 0xd62828].forEach((col, i) => box(f, 0.06, 0.11, 0.008, mat(col), 0.035 + i * 0.06, 1.72, 0.02));
-  // Halles technologiques
-  const brick = mat(C.brick), brick2 = mat(C.brick2), glass = glow(0x9fd0ff, 0.6);
+  sign.position.set(0, 1.02, 0.41); f.add(sign);
+  mansardRoof(f, 0.72, 0.34, 0.2, mat(C.zinc), 0, 1.12, 0.315);
+  cyl(f, 0.008, 0.008, 0.4, 5, mat(0x333333), 0, 1.45, 0.315);
+  [0x1f3a93, 0xf5f5f5, 0xd62828].forEach((col, i) => box(f, 0.06, 0.11, 0.008, mat(col), 0.035 + i * 0.06, 1.72, 0.315));
+  // Halles technologiques : ateliers creux, machines-outils
+  const brick = mat(C.brick), glass = glow(0x9fd0ff, 0.6);
   [-0.95, 0, 0.95].forEach((x, i) => {
     const hl = structure(g, x, -0.5);
-    box(hl, 0.78, 0.6, 1.0, brick, 0, 0, 0);
-    for (let k = 0; k < 4; k++) box(hl, 0.8, 0.04, 1.02, k % 2 ? brick : brick2, 0, 0.12 + k * 0.13, 0);
-    // Sheds vitrés
-    for (let k = 0; k < 4; k++) {
+    const k = kitOf(hl);
+    hollow(k, { w: 0.78, d: 1.0, h: 0.6, floors: 1, wall: C.brick, inner: 0xd9c9b0, doors: { '-z': 0, '+z': 0 }, doorW: 0.12, doorH: 0.17, furnish: 'workshop', floorCol: 0x8a8a86, seed: 12 + i });
+    for (let q = 0; q < 4; q++) faceBands(k, 0.78, 1.0, 0, 0, 0.12 + q * 0.13, 0.04, q % 2 ? C.brick : C.brick2, { out: 0.008, gap: { x0: -0.08, x1: 0.08, y1: 0.18 } });
+    for (let q = 0; q < 4; q++) {
       const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.lineTo(0.25, 0); sh.lineTo(0, 0.16); sh.closePath();
-      const m = add(hl, new THREE.ExtrudeGeometry(sh, { depth: 0.78, bevelEnabled: false }), mat(0x6f6a66), -0.39, 0.6, -0.25 + k * 0.25);
+      const m = add(hl, new THREE.ExtrudeGeometry(sh, { depth: 0.78, bevelEnabled: false }), mat(0x6f6a66), -0.39, 0.6, -0.25 + q * 0.25);
       m.rotation.y = Math.PI / 2;
-      box(hl, 0.76, 0.15, 0.01, glass, 0, 0.6, -0.25 + k * 0.25 + 0.005);
+      box(hl, 0.76, 0.15, 0.01, glass, 0, 0.6, -0.25 + q * 0.25 + 0.005);
     }
-    // Grande baie centrale et baies latérales (pignon vers -Z)
-    arch(hl, 0.24, 0.48, glass, 0, 0.06, -0.505);
-    arch(hl, 0.1, 0.3, glass, -0.24, 0.06, -0.505);
-    arch(hl, 0.1, 0.3, glass, 0.24, 0.06, -0.505);
-    if (i === 1) box(hl, 0.3, 0.06, 0.06, mat(0x2b2b2b), 0, 0.6, -0.52);
+    arch(hl, 0.24, 0.3, glass, 0, 0.2, -0.515);
+    arch(hl, 0.1, 0.3, glass, -0.24, 0.06, -0.515);
+    arch(hl, 0.1, 0.3, glass, 0.24, 0.06, -0.515);
+    if (i === 1) box(hl, 0.3, 0.06, 0.06, mat(0x2b2b2b), 0, 0.6, -0.53);
   });
-  // Platanes du boulevard
-  for (let i = 0; i < 7; i++) tree(structure(g, -1.5 + i * 0.5, 1.35, 0, false), 0, 0, 0, 1.05, 0x5b8a45);
+  for (let i = 0; i < 7; i++) treeAt(g, -1.5 + i * 0.5, 1.35, 1.05, 0x5b8a45);
   // Tour Eiffel, au loin sur la lune
   const e = structure(g, -1.7, -1.35, 0.4, false);
   e.scale.setScalar(0.85);
   const iron = mat(0x6e4f39);
+  const legs = [];
   for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
     const leg = add(e, new THREE.CylinderGeometry(0.03, 0.06, 0.6, 4), iron, sx * 0.17, 0.27, sz * 0.17);
     leg.rotation.set(sz * -0.32, 0, sx * 0.32);
+    legs.push([sx * 0.26, sz * 0.26, 0.06, -0.05, 0.3]);
   }
+  e.userData.colliders = { boxes: [], cyls: legs, rings: [] };
   box(e, 0.42, 0.05, 0.42, iron, 0, 0.5, 0);
   add(e, new THREE.CylinderGeometry(0.08, 0.16, 0.55, 4), iron, 0, 0.8, 0, [0, Math.PI / 4, 0]);
   box(e, 0.2, 0.04, 0.2, iron, 0, 1.07, 0);
@@ -389,20 +413,24 @@ export function ensamParis() {
 // ---------------------------------------------------------------------------
 export function universiteLeMans(R) {
   const g = new THREE.Group();
-  const white = mat(0xeceae4), glass = glow(0x8cc7ff, 0.7), accent = mat(0xe07a3a);
+  const accent = 0xe07a3a;
   const a = structure(g, -0.35, -0.35);
-  box(a, 1.3, 0.62, 0.55, white, 0, 0, 0);
-  for (let i = 0; i < 3; i++) box(a, 1.24, 0.09, 0.57, glass, 0, 0.1 + i * 0.18, 0);
-  for (let i = 0; i < 9; i++) box(a, 0.03, 0.6, 0.06, accent, -0.6 + i * 0.15, 0, 0.3);
+  const ka = kitOf(a);
+  hollow(ka, { w: 1.3, d: 0.55, h: 0.62, floors: 3, wall: 0xeceae4, inner: 0xf4f2ec, doors: { '+z': 0.075, '-z': 0 }, furnish: 'office', floorCol: 0xb8b2a6, seed: 13 });
+  for (let i = 0; i < 3; i++) faceBands(ka, 1.3, 0.55, 0, 0, 0.16 + i * 0.18, 0.08, 0x8cc7ff, { out: 0.006, glow: true });
+  for (let i = 0; i < 9; i++) ka.box(0.03, 0.6, 0.06, -0.6 + i * 0.15, 0, 0.3, accent);
   const b = structure(g, 0.6, -0.45);
-  box(b, 0.5, 1.05, 0.5, white, 0, 0, 0);
-  for (let i = 0; i < 4; i++) box(b, 0.52, 0.1, 0.52, glass, 0, 0.12 + i * 0.22, 0);
-  box(b, 0.54, 0.05, 0.54, mat(0x9aa3ad), 0, 1.05, 0);
+  const kb = kitOf(b);
+  hollow(kb, { w: 0.5, d: 0.5, h: 1.05, floors: 2, stair: 'spiral', wall: 0xeceae4, inner: 0xf4f2ec, furnish: 'office', floorCol: 0xb8b2a6, seed: 14 });
+  for (let i = 0; i < 4; i++) faceBands(kb, 0.5, 0.5, 0, 0, 0.18 + i * 0.22, 0.09, 0x8cc7ff, { out: 0.006, glow: true });
+  kb.box(0.54, 0.05, 0.54, 0, 1.05, 0, 0x9aa3ad);
   const lib = structure(g, -0.25, 0.45);
-  box(lib, 0.9, 0.35, 0.5, white, 0, 0, 0);
-  box(lib, 0.88, 0.25, 0.02, glass, 0, 0.05, 0.255);
-  box(lib, 0.92, 0.04, 0.52, mat(0x6d9a4e), 0, 0.35, 0);
-  for (const [x, z] of [[0.55, 0.5], [0.85, 0.15], [-0.9, 0.75]]) tree(structure(g, x, z, 0, false), 0, 0, 0, 0.95, 0x557f42);
+  const kl = kitOf(lib);
+  hollow(kl, { w: 0.9, d: 0.5, h: 0.35, floors: 1, wall: 0xeceae4, inner: 0xf4f2ec, doors: { '+z': 0 }, furnish: 'library', seed: 15 });
+  kl.box(0.3, 0.14, 0.006, -0.28, 0.16, 0.253, 0x8cc7ff, { glow: true });
+  kl.box(0.3, 0.14, 0.006, 0.28, 0.16, 0.253, 0x8cc7ff, { glow: true });
+  kl.box(0.92, 0.04, 0.52, 0, 0.35, 0, 0x6d9a4e);
+  for (const [x, z] of [[0.55, 0.5], [0.85, 0.15], [-0.9, 0.75]]) treeAt(g, x, z, 0.95, 0x557f42);
 
   // Circuit : bande d'asphalte qui épouse la sphère, bordée de lignes blanches
   const track = new THREE.Group(); track.userData.noDrape = true; g.add(track);
@@ -412,15 +440,16 @@ export function universiteLeMans(R) {
   // Passerelle Dunlop (arche en forme de pneu) et voiture
   const dun = structure(g, 1.54, 0, 0, false);
   add(dun, new THREE.TorusGeometry(0.34, 0.07, 10, 28, Math.PI), mat(0x1b1b1d), 0, 0, 0);
+  dun.userData.colliders = { boxes: [], cyls: [[0.34, 0, 0.07, -0.05, 0.25], [-0.34, 0, 0.07, -0.05, 0.25]], rings: [] };
   const label = textPlane('DUNLOP', 0.34, 0.07, { color: '#1b1b1d', bg: '#f2c618' });
-  label.position.set(0, 0.36, 0.075); label.rotation.y = 0; dun.add(label);
+  label.position.set(0, 0.36, 0.075); dun.add(label);
   const label2 = label.clone(); label2.rotation.y = Math.PI; label2.position.z = -0.075; dun.add(label2);
   const car = structure(g, -1.05, 1.13, -Math.PI / 4, false);
   box(car, 0.24, 0.06, 0.11, mat(0xd8342c), 0, 0.01, 0);
   box(car, 0.1, 0.05, 0.09, mat(0x1b2733), -0.02, 0.07, 0);
   box(car, 0.04, 0.02, 0.13, mat(0x111111), -0.12, 0.09, 0);
   for (const sz of [1, -1]) add(car, new THREE.SphereGeometry(0.018, 6, 6), glow(0xfff2c0, 4), 0.125, 0.04, sz * 0.035);
-  // Ligne de départ en damier
+  car.userData.colliders = { boxes: [], cyls: [[0, 0, 0.1, -0.02, 0.1]], rings: [] };
   const start = structure(g, 0, -1.54, 0, false);
   for (let i = 0; i < 5; i++) for (let j = 0; j < 2; j++) box(start, 0.05, 0.006, 0.05, mat((i + j) % 2 ? 0x111111 : 0xffffff), -0.1 + i * 0.05, 0.004, j * 0.05);
   return g;
@@ -435,31 +464,41 @@ export function amuMarseille(R) {
   const g = new THREE.Group();
   const white = mat(0xf2eee4), green = mat(0x7a9278);
   const gold = new THREE.MeshStandardMaterial({ color: 0xd4a640, emissive: 0xffb540, emissiveIntensity: 1.6 });
+  // Colline calcaire, assez douce pour y monter à pied
   const hill = structure(g, 0.4, -0.35, 0, false);
-  cyl(hill, 0.32, 1.05, 0.72, 9, mat(0xdcd5c4), 0, -0.05, 0);
-  cyl(hill, 0.28, 0.33, 0.06, 9, mat(0xc8c0ac), 0, 0.67, 0);
-  const b = new THREE.Group(); b.position.set(0, 0.72, 0); hill.add(b);
-  for (let i = 0; i < 5; i++) box(b, 0.62, 0.07, 0.3, i % 2 ? green : white, -0.1, i * 0.07, 0);
+  const HT = 0.62;
+  const hm = cyl(hill, 0.5, 1.4, HT, 18, mat(0xdcd5c4), 0, -0.05, 0);
+  hm.userData.terrain = true;
+  const cap = cyl(hill, 0.5, 0.5, 0.02, 18, mat(0xc8c0ac), 0, HT - 0.05, 0);
+  cap.userData.terrain = true;
+  const top = HT - 0.03;
+  // Basilique creuse (assises blanches et vertes), parvis côté +Z
+  const k = kitOf(hill);
+  hollow(k, { w: 0.62, d: 0.3, h: 0.35, x: -0.1, z: 0, base: top, floors: 1, wall: 0xf2eee4, inner: 0xf4efe6, doors: { '+z': 0 }, furnish: 'church', floorCol: 0xc9b890, seed: 16, doorW: 0.1, doorH: 0.18 });
+  for (let i = 0; i < 5; i++) faceBands(k, 0.62, 0.3, -0.1, 0, top + i * 0.07, 0.07, i % 2 ? 0x7a9278 : 0xf2eee4, { out: 0.006, gap: { x0: -0.16, x1: -0.04, y1: top + 0.18 } });
+  const b = new THREE.Group(); b.position.set(0, top, 0); hill.add(b);
   gableRoof(b, 0.62, 0.1, 0.3, mat(0x9a6a4e), -0.1, 0.35, 0);
   cyl(b, 0.11, 0.11, 0.12, 12, white, -0.15, 0.38, 0);
   add(b, new THREE.SphereGeometry(0.11, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), green, -0.15, 0.5, 0);
-  // Clocher : socle rayé, beffroi ajouré, lanterne et statue
-  for (let i = 0; i < 9; i++) box(b, 0.24, 0.08, 0.24, i % 2 ? green : white, 0.3, i * 0.08, 0);
-  box(b, 0.2, 0.2, 0.2, white, 0.3, 0.72, 0);
+  // Clocher creux à escalier à vis, beffroi ajouré, lanterne et statue
+  hollow(k, { w: 0.24, d: 0.24, h: 0.72, x: 0.33, z: 0, base: top, floors: 2, stair: 'spiral', wall: 0xf2eee4, inner: 0xeee8dc, doors: { '+z': 0 }, doorW: 0.08, doorH: 0.15, furnish: 'none', seed: 17, topRoom: 0.14 });
+  for (let i = 0; i < 9; i++) faceBands(k, 0.24, 0.24, 0.33, 0, top + i * 0.08, 0.08, i % 2 ? 0x7a9278 : 0xf2eee4, { out: 0.005, gap: { x0: 0.28, x1: 0.38, y1: top + 0.16 } });
+  box(b, 0.2, 0.2, 0.2, white, 0.33, 0.72, 0);
   for (const r of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
-    const fc = new THREE.Group(); fc.position.set(0.3, 0.72, 0); fc.rotation.y = r; b.add(fc);
+    const fc = new THREE.Group(); fc.position.set(0.33, 0.72, 0); fc.rotation.y = r; b.add(fc);
     arch(fc, 0.08, 0.15, mat(0x2a2620), 0, 0.03, 0.101);
   }
-  cyl(b, 0.07, 0.09, 0.12, 8, white, 0.3, 0.92, 0);
-  cyl(b, 0.02, 0.035, 0.2, 8, gold, 0.3, 1.04, 0);
-  add(b, new THREE.SphereGeometry(0.025, 8, 6), gold, 0.3, 1.27, 0);
+  cyl(b, 0.07, 0.09, 0.12, 8, white, 0.33, 0.92, 0);
+  cyl(b, 0.02, 0.035, 0.2, 8, gold, 0.33, 1.04, 0);
+  add(b, new THREE.SphereGeometry(0.025, 8, 6), gold, 0.33, 1.27, 0);
   // Bâtiment AMU
   const u = structure(g, -0.85, 0.6);
-  box(u, 1.05, 0.48, 0.48, mat(0xf4f1ea), 0, 0, 0);
-  for (let i = 0; i < 2; i++) box(u, 1.07, 0.08, 0.5, glow(0x8ccaff, 0.7), 0, 0.1 + i * 0.18, 0);
-  box(u, 0.12, 0.62, 0.06, mat(0x1d4f9c), 0.45, 0, 0.26);
+  const ku = kitOf(u);
+  hollow(ku, { w: 1.05, d: 0.48, h: 0.48, floors: 2, wall: 0xf4f1ea, inner: 0xf6f4ee, doors: { '+z': -0.15, '-z': 0 }, furnish: 'office', floorCol: 0xbab4a8, seed: 18 });
+  for (let i = 0; i < 2; i++) faceBands(ku, 1.05, 0.48, 0, 0, 0.15 + i * 0.2, 0.07, 0x8ccaff, { out: 0.006, glow: true });
+  ku.box(0.12, 0.62, 0.06, 0.45, 0, 0.27, 0x1d4f9c);
   const amu = textPlane('AMU', 0.1, 0.05, { color: '#ffffff', bg: '#1d4f9c' });
-  amu.position.set(0.45, 0.5, 0.295); u.add(amu);
+  amu.position.set(0.45, 0.5, 0.305); u.add(amu);
   // Palmiers et pins d'Alep
   for (const [x, z] of [[0.55, 0.8], [0.1, 1.05]]) {
     const p = structure(g, x, z, 0, false);
@@ -469,8 +508,9 @@ export function amuMarseille(R) {
       leaf.rotation.set(0, (i / 7) * Math.PI * 2, -0.4);
       leaf.translateX(0.14);
     }
+    p.userData.colliders = { boxes: [], cyls: [[0, 0, 0.035, -0.05, 0.4]], rings: [] };
   }
-  for (const [x, z] of [[-1.5, -0.4], [1.45, 0.45]]) tree(structure(g, x, z, 0, false), 0, 0, 0, 1.2, 0x5f7d3f);
+  for (const [x, z] of [[-1.5, -0.4], [1.45, 0.45]]) treeAt(g, x, z, 1.2, 0x5f7d3f);
   // La Méditerranée : une mer en calotte sur le flanc de la lune
   const sea = new THREE.Mesh(
     new THREE.SphereGeometry(R + 0.02, 48, 12, 0, Math.PI * 2, 0, 0.75),
@@ -479,7 +519,6 @@ export function amuMarseille(R) {
   sea.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0.8, -0.35, 0.5).normalize());
   sea.userData.noDrape = true;
   sea.userData.water = true;
-  sea.userData.terrain = true;
   g.add(sea);
   return g;
 }
@@ -487,46 +526,89 @@ export function amuMarseille(R) {
 // ---------------------------------------------------------------------------
 // Observatoire de Meudon : Château-Neuf de Mansart (1706), surmonté de la Grande Coupole (18,5 m, 1895)
 // sur un haut tambour, terrasse à balustrade, petites coupoles, forêt de Meudon.
+// On entre par le pavillon central, on monte ses trois étages puis l'escalier du tambour
+// jusqu'au plancher de la coupole, où se trouve la grande lunette.
 // ---------------------------------------------------------------------------
 export function observatoireMeudon() {
   const g = new THREE.Group();
   const c = structure(g, 0, 0.2);
-  wing(c, { len: 2.8, depth: 0.62, h: 0.72, floors: 2, wall: 0xe8dec8, roofH: 0.26, dormersN: 0 });
-  box(c, 0.9, 0.8, 0.7, mat(0xefe6d2), 0, 0, 0.02);
-  pediment(c, 0.92, 0.16, 0.06, 0xefe6d2, 0, 0.8, 0.31);
-  // Tambour et Grande Coupole
-  cyl(c, 0.6, 0.62, 0.48, 36, mat(0xe6dcc6), 0, 0.8, 0);
+  const k = kitOf(c);
+  // Ailes du château, de part et d'autre du pavillon central
+  for (const sx of [-1, 1]) {
+    const s = new THREE.Group(); s.position.x = sx * 1.0; c.add(s);
+    wing(s, { len: 0.8, depth: 0.62, h: 0.72, floors: 2, wall: 0xe8dec8, roofH: 0.26, furnish: 'observatory', doors: { '+z': 0 }, seed: 19 + sx });
+    s.userData.kit.build(s); delete s.userData.kit;
+  }
+  // Pavillon central carré : hall, deux étages de bureaux, escalier jusqu'au toit-terrasse sous le tambour
+  const PH = 0.8;
+  hollow(k, { w: 1.2, d: 1.2, h: PH, floors: 3, toRoof: true, wall: 0xefe6d2, inner: 0xf3ecdc, doors: { '+z': 0 }, doorW: 0.11, doorH: 0.18, furnish: 'observatory', stairX: -0.2, stairZ: -0.3, seed: 21 });
+  facadeWindows(k, { w: 1.1, x: 0, z: 0.6, y0: 0, floors: 3, fh: PH / 3, cols: 5, side: 1, ww: 0.07, wh: 0.11, lit: LIT, skip: (a, f) => f === 0 && Math.abs(a) < 0.12 });
+  facadeWindows(k, { w: 1.1, x: 0, z: -0.6, y0: 0, floors: 3, fh: PH / 3, cols: 5, side: -1, ww: 0.07, wh: 0.11, lit: LIT });
+  pediment(c, 0.92, 0.16, 0.06, 0xefe6d2, 0, PH, 0.55);
+  // Tambour : mur circulaire creux, deux volées droites jusqu'au plancher de la coupole
+  const DR = 0.6, DY = PH, DOME = 1.33;
+  add(c, new THREE.CylinderGeometry(DR + 0.02, DR + 0.02, DOME - DY, 40, 1, true), mat(0xe6dcc6, { side: THREE.DoubleSide }), 0, DY + (DOME - DY) / 2, 0);
+  k.ring(0, 0, DR, DY, DOME + 0.9);
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2;
-    const w = add(c, new THREE.BoxGeometry(0.06, 0.13, 0.02), glow(LIT, 1.2), Math.sin(a) * 0.605, 1.03, Math.cos(a) * 0.605);
+    const w = add(c, new THREE.BoxGeometry(0.06, 0.13, 0.02), glow(LIT, 1.2), Math.sin(a) * (DR + 0.025), 1.03, Math.cos(a) * (DR + 0.025));
     w.rotation.y = a;
   }
-  cyl(c, 0.66, 0.66, 0.05, 36, mat(0xf2ebdc), 0, 1.28, 0);
+  const mid = (DY + DOME) / 2;
+  const flight = (y0, y1, lane, dir) => {
+    const rise = M(0.19), run = M(0.28), n = Math.ceil((y1 - y0) / rise), r = (y1 - y0) / n;
+    for (let i = 0; i < n; i++) {
+      const xa = dir > 0 ? -0.2 + i * run : -0.2 + n * run - (i + 1) * run;
+      k.box(run, (i + 1) * r, 0.075, xa + run / 2, y0, lane, i % 2 ? 0x8a5c3a : 0x7d5234);
+    }
+    return n * run;
+  };
+  const L1 = flight(DY, mid, 0.42, 1);
+  k.box(0.12, mid - DY, 0.17, -0.2 + L1 + 0.06, DY, 0.375, 0x7d5234);
+  const L2 = flight(mid, DOME, 0.33, -1);
+  // Plancher de la coupole (fixe), percé au-dessus de la seconde volée
+  const floorShape = new THREE.Shape(); floorShape.absarc(0, 0, DR, 0, Math.PI * 2, false);
+  const hx0 = -0.2, hx1 = -0.2 + L2, hz0 = 0.29, hz1 = 0.47;
+  const hole = new THREE.Path(); hole.moveTo(hx0, hz0); hole.lineTo(hx1, hz0); hole.lineTo(hx1, hz1); hole.lineTo(hx0, hz1); hole.closePath();
+  floorShape.holes.push(hole);
+  const fg = new THREE.ExtrudeGeometry(floorShape, { depth: 0.02, bevelEnabled: false, curveSegments: 32 });
+  fg.rotateX(Math.PI / 2); fg.translate(0, DOME, 0);
+  k.geo(fg, 0x5a4636);
+  // Collisions du plancher : carré inscrit percé + quatre segments
+  const q = DR * 0.7;
+  const fy = DOME - 0.02;
+  k.solid(-q, fy, -q, q, DOME, hz0);
+  k.solid(-q, fy, hz0, hx0, DOME, 0.58); k.solid(hx1, fy, hz0, q, DOME, 0.58);
+  for (const [x0, z0, x1, z1] of [[q, -0.4, 0.58, 0.4], [-0.58, -0.4, -q, 0.4], [-0.4, -0.58, 0.4, -q]]) k.solid(x0, fy, z0, x1, DOME, z1);
+  // Garde-corps autour de la trémie
+  k.box(L2 - 0.03, 0.05, 0.008, -0.2 + L2 / 2 + 0.015, DOME, hz0, 0x6a4428);
+  add(c, new THREE.CylinderGeometry(0.66, 0.66, 0.05, 36, 1, true), mat(0xf2ebdc, { side: THREE.DoubleSide }), 0, 1.305, 0);
+  // Fauteuil d'observation et lampe rouge (on préserve la vision nocturne)
+  k.box(0.04, 0.025, 0.04, 0.12, DOME, -0.12, 0x6a3a2a);
+  k.box(0.02, 0.02, 0.02, -0.3, DOME + 0.12, -0.3, 0xff4a3a, { glow: true });
+  c.userData.scope = { x: 0, z: 0, y: DOME, r: 0.2 };
   // Grande Coupole : coupole tournante, trappe à deux volets, grande lunette sur sa monture
-  const cp = new THREE.Group(); cp.name = 'coupole'; cp.position.set(0, 1.33, 0); c.add(cp);
+  const cp = new THREE.Group(); cp.name = 'coupole'; cp.position.set(0, DOME, 0); c.add(cp);
   const rot = new THREE.Group(); rot.name = 'coupole-rot'; cp.add(rot);
   const GAP = 0.44;
   const domeMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ad, metalness: 0.5, roughness: 0.5, flatShading: true });
   const shell = new THREE.SphereGeometry(0.64, 32, 12, Math.PI / 2 + GAP / 2, Math.PI * 2 - GAP, 0, Math.PI / 2);
   rot.add(new THREE.Mesh(shell, domeMat));
-  rot.add(new THREE.Mesh(shell, new THREE.MeshStandardMaterial({ color: 0x2b2a2e, side: THREE.BackSide })));
-  // Nervures de la coupole
+  rot.add(new THREE.Mesh(shell, new THREE.MeshStandardMaterial({ color: 0x3b3a40, side: THREE.BackSide })));
   for (let i = 0; i < 12; i++) {
     const a = Math.PI / 2 + GAP / 2 + ((Math.PI * 2 - GAP) * (i + 0.5)) / 12;
-    // Arc méridien du bord jusqu'au sommet, orienté vers l'azimut a
     const holder = new THREE.Group(); holder.rotation.y = a + Math.PI;
     holder.add(new THREE.Mesh(new THREE.TorusGeometry(0.645, 0.008, 4, 24, Math.PI / 2), mat(0x7d8790)));
     rot.add(holder);
   }
-  // Volets de la trappe (ils glissent sur la coupole à l'ouverture)
   const shutterGeo = (start) => new THREE.SphereGeometry(0.652, 6, 12, start, GAP / 2 + 0.01, 0, Math.PI / 2 - 0.02);
   const shA = new THREE.Mesh(shutterGeo(Math.PI / 2 - GAP / 2 - 0.005), domeMat); shA.name = 'shutter-a';
   const shB = new THREE.Mesh(shutterGeo(Math.PI / 2 - 0.005), domeMat); shB.name = 'shutter-b';
   rot.add(shA, shB);
   rot.userData.gap = GAP;
-  // Plancher et grande lunette (double réfracteur, 16 m de focale dans la réalité)
-  add(rot, new THREE.CylinderGeometry(0.6, 0.6, 0.02, 32), mat(0x5a4636), 0, -0.02, 0);
-  cyl(rot, 0.05, 0.07, 0.3, 10, mat(0x3a3d40), 0, -0.02, 0);
+  // Pilier et grande lunette (double réfracteur, 16 m de focale dans la réalité)
+  cyl(rot, 0.05, 0.07, 0.3, 10, mat(0x3a3d40), 0, 0, 0);
+  k.cyls.push([0, 0, 0.07, DOME, DOME + 0.3]);
   const alt = new THREE.Group(); alt.name = 'tube-alt'; alt.position.set(0, 0.3, 0); rot.add(alt);
   const tubeMat = mat(0x2d3a33);
   const tube = new THREE.CylinderGeometry(0.055, 0.045, 0.95, 14);
@@ -537,26 +619,30 @@ export function observatoireMeudon() {
   const t2 = new THREE.Mesh(tube2, tubeMat); t2.position.set(0.09, 0, 0); alt.add(t2);
   add(alt, new THREE.CylinderGeometry(0.06, 0.06, 0.05, 14), mat(0xb08a4a), 0, 0, 0.47, [Math.PI / 2, 0, 0]);
   add(alt, new THREE.BoxGeometry(0.2, 0.06, 0.08), mat(0x3a3d40), 0.04, -0.06, 0);
-  // Point de vue : juste devant l'objectif, dans l'axe optique
+  // Oculaire (côté bas du tube) et point de vue de la caméra, devant l'objectif dans l'axe optique
+  add(alt, new THREE.CylinderGeometry(0.015, 0.02, 0.06, 8), mat(0xb08a4a), 0, -0.02, -0.5, [Math.PI / 2, 0, 0]);
   const eye = new THREE.Object3D(); eye.name = 'eyepiece'; eye.position.set(0, 0, 0.53); alt.add(eye);
-  // Terrasse à balustrade
+  // Terrasse à balustrade (praticable)
   const t = structure(g, 0, 1.15);
-  box(t, 2.6, 0.06, 0.5, mat(0xd8cfbd), 0, 0, 0);
-  for (let i = 0; i < 26; i++) cyl(t, 0.012, 0.012, 0.08, 5, mat(0xefe7d6), -1.25 + i * 0.1, 0.06, 0.23);
-  box(t, 2.6, 0.02, 0.03, mat(0xefe7d6), 0, 0.14, 0.23);
-  // Petites coupoles (télescope de 1 m, lunette photographique)
+  const kt = kitOf(t);
+  kt.box(2.6, 0.03, 0.5, 0, 0, 0, 0xd8cfbd);
+  for (let i = 0; i < 26; i++) cyl(t, 0.012, 0.012, 0.08, 5, mat(0xefe7d6), -1.25 + i * 0.1, 0.03, 0.23);
+  kt.box(2.6, 0.02, 0.03, 0, 0.11, 0.23, 0xefe7d6);
+  kt.solid(-1.3, 0.03, 0.215, 1.3, 0.13, 0.245);
+  // Petites coupoles (télescope de 1 m, lunette photographique), creuses
   for (const [x, z] of [[-1.45, -0.7], [1.4, -0.75]]) {
     const s = structure(g, x, z);
-    box(s, 0.42, 0.32, 0.42, mat(0xe6dcc6), 0, 0, 0);
+    hollow(kitOf(s), { w: 0.42, d: 0.42, h: 0.32, floors: 1, wall: 0xe6dcc6, inner: 0xf0e8d8, doors: { '+z': 0 }, furnish: 'observatory', seed: 22 });
     cyl(s, 0.2, 0.2, 0.06, 16, mat(0xe6dcc6), 0, 0.32, 0);
     add(s, new THREE.SphereGeometry(0.21, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf4f4f0), 0, 0.38, 0);
   }
-  for (const [x, z, s] of [[-1.75, 0.3, 1.2], [-1.1, -1.3, 1.1], [0.2, -1.4, 1], [1.0, -1.3, 1.15], [1.8, 0.35, 1.2], [-0.6, -1.1, 0.9]]) tree(structure(g, x, z, 0, false), 0, 0, 0, s, 0x3c6634);
+  for (const [x, z, s] of [[-1.75, 0.3, 1.2], [-1.1, -1.3, 1.1], [0.2, -1.4, 1], [1.0, -1.3, 1.15], [1.8, 0.35, 1.2], [-0.6, -1.1, 0.9]]) treeAt(g, x, z, s, 0x3c6634);
   return g;
 }
 
 // ---------------------------------------------------------------------------
-// Enedis Data Challenge : pylônes électriques, câbles, données mesurées et reconstituées
+// Enedis Data Challenge : pylônes électriques, câbles, données mesurées et reconstituées,
+// poste de transformation et salle de contrôle où l'on peut entrer
 // ---------------------------------------------------------------------------
 export function enedisPylon() {
   const g = new THREE.Group();
@@ -569,6 +655,7 @@ export function enedisPylon() {
       const leg = add(p, new THREE.CylinderGeometry(0.02, 0.03, 1.7, 4), steel, sx * 0.13, 0.82, sz * 0.13);
       leg.rotation.set(sz * -0.1, 0, sx * 0.1);
     }
+    p.userData.colliders = { boxes: [], cyls: [[0.2, 0.2, 0.04, -0.05, 0.4], [-0.2, 0.2, 0.04, -0.05, 0.4], [0.2, -0.2, 0.04, -0.05, 0.4], [-0.2, -0.2, 0.04, -0.05, 0.4]], rings: [] };
     for (let i = 0; i < 4; i++) box(p, 0.42 - i * 0.07, 0.025, 0.42 - i * 0.07, steel, 0, 0.3 + i * 0.38, 0);
     box(p, 1.1, 0.04, 0.06, steel, 0, 1.25, 0);
     box(p, 0.8, 0.04, 0.06, steel, 0, 1.55, 0);
@@ -581,6 +668,19 @@ export function enedisPylon() {
   };
   build(-0.8, 0.1, 1);
   build(0.95, -0.25, 0.8);
+  // Salle de contrôle (écrans des données) et poste de transformation
+  const cr = structure(g, 0.1, 0.85);
+  const k = kitOf(cr);
+  hollow(k, { w: 0.9, d: 0.42, h: 0.3, floors: 1, wall: 0xdfe3e6, inner: 0xeef1f3, doors: { '+z': 0.2 }, furnish: 'office', floorCol: 0x9aa3ad, seed: 23 });
+  faceBands(k, 0.9, 0.42, 0, 0, 0.17, 0.07, 0x7dffc8, { out: 0.006, glow: true });
+  k.box(0.94, 0.03, 0.46, 0, 0.3, 0, 0x5a6670);
+  const tr = structure(g, -0.25, -0.8);
+  const kt = kitOf(tr);
+  for (let i = 0; i < 3; i++) {
+    kt.box(0.14, 0.18, 0.14, -0.2 + i * 0.2, 0, 0, 0x8c949c);
+    kt.cyl(0.015, 0.015, 0.08, -0.2 + i * 0.2, 0.18, 0, 0xe8e0d0, { collide: false });
+  }
+  kt.box(0.7, 0.04, 0.3, 0, 0, 0, 0x6a7078);
   // Câbles et données, calculés après le drapé à partir des extrémités des consoles
   g.userData.afterDrape = (grp) => {
     grp.updateMatrixWorld(true);
@@ -609,37 +709,47 @@ export function enedisPylon() {
 }
 
 // ---------------------------------------------------------------------------
-// NOCTURNE : un piano à queue sur une scène en plein air, kiosque et lampadaires
+// NOCTURNE : un piano à queue sur une scène en plein air, kiosque, loges et lampadaires
 // ---------------------------------------------------------------------------
 export function pianoStage() {
   const g = new THREE.Group();
   const st = structure(g, 0, 0);
-  // Estrade ronde en bois
+  const k = kitOf(st);
+  // Estrade ronde en bois, avec ses marches
   cyl(st, 1.05, 1.1, 0.12, 24, mat(0x8a5a36), 0, 0, 0);
   cyl(st, 1.08, 1.08, 0.025, 24, mat(0xd8b47a), 0, 0.12, 0);
+  k.cyls.push([0, 0, 1.08, -0.1, 0.145]);
+  for (let i = 0; i < 5; i++) k.box(0.36, 0.029 * (i + 1), 0.035, 0, 0, 1.24 - i * 0.035, i % 2 ? 0xb88a56 : 0xa77a48);
   // Conque acoustique (demi-coupole) derrière le piano
   const shell = add(st, new THREE.SphereGeometry(1.0, 24, 10, Math.PI, Math.PI, 0, Math.PI / 2), mat(0xefe6d6, { side: THREE.DoubleSide }), 0, 0.14, -0.15);
   shell.scale.set(1, 1.15, 0.85);
+  k.ring(0, -0.15, 0.85, 0.14, 1.2, [[0, Math.PI]]);
   for (let i = 0; i < 5; i++) {
     const rib = add(st, new THREE.TorusGeometry(1.0 - i * 0.001, 0.015, 4, 20, Math.PI), mat(0xd8c8a8), 0, 0.14, -0.15);
     rib.rotation.set(0, (i / 4) * Math.PI - Math.PI / 2, 0);
     rib.scale.set(1, 1.15, 0.85);
   }
-  // Piano à queue
+  // Piano à queue et banquette
   const pn = grandPiano();
   pn.scale.setScalar(0.42);
   pn.position.set(0, 0.14, 0.25);
   pn.rotation.y = Math.PI;
   st.add(pn);
-  // Banquette
+  k.solid(-0.24, 0.14, -0.05, 0.24, 0.5, 0.62);
   box(st, 0.25, 0.1, 0.1, mat(0x1a1a1a), 0, 0.14, -0.05);
+  // Loges des musiciens (creuses), derrière la scène
+  const lg = structure(g, -1.0, -1.15, 0.35);
+  hollow(kitOf(lg), { w: 0.7, d: 0.4, h: 0.3, floors: 1, wall: 0x8a6a8c, inner: 0xe8dce6, doors: { '+z': 0 }, furnish: 'home', seed: 24 });
+  gableRoof(lg, 0.7, 0.14, 0.4, mat(0x4a3a5a), 0, 0.3, 0);
+  facadeWindows(kitOf(lg), { w: 0.6, x: 0, z: 0.2, y0: 0, floors: 1, fh: 0.3, cols: 4, side: 1, ww: 0.06, wh: 0.08, lit: 0xffd28a, skip: (a) => Math.abs(a) < 0.08 });
   // Lampadaires
   for (const [x, z] of [[-1.25, 0.6], [1.25, 0.6]]) {
     const l = structure(g, x, z, 0, false);
     cyl(l, 0.015, 0.02, 0.7, 6, mat(0x2b2b2b), 0, 0, 0);
     add(l, new THREE.SphereGeometry(0.06, 8, 6), glow(0xffd28a, 3), 0, 0.74, 0);
+    l.userData.colliders = { boxes: [], cyls: [[0, 0, 0.025, -0.05, 0.7]], rings: [] };
   }
-  for (const [x, z, sc] of [[-1.4, -0.9, 1.1], [1.45, -0.8, 1.0], [0.3, 1.5, 0.9]]) tree(structure(g, x, z, 0, false), 0, 0, 0, sc, 0x5a7d48);
+  for (const [x, z, sc] of [[-1.4, -0.4, 1.1], [1.45, -0.8, 1.0], [0.3, 1.6, 0.9]]) treeAt(g, x, z, sc, 0x5a7d48);
   return g;
 }
 
@@ -648,23 +758,24 @@ export function pianoStage() {
 // ---------------------------------------------------------------------------
 export function implantLab() {
   const g = new THREE.Group();
-  // Socle et implant géant
   const pd = structure(g, 0.35, 0.25);
   cyl(pd, 0.32, 0.38, 0.22, 16, mat(0xd9d4ca), 0, 0, 0);
+  pd.userData.colliders = { boxes: [], cyls: [[0, 0, 0.38, -0.05, 0.22]], rings: [] };
   const im = glenoidImplant();
   im.scale.setScalar(0.32);
   im.position.set(0, 0.62, 0);
   pd.add(im);
   // Laboratoire : bâtiment bas et moderne, bandeau vitré, verrière
   const lab = structure(g, -0.6, -0.55);
-  box(lab, 1.3, 0.45, 0.6, mat(0xecebe6), 0, 0, 0);
-  box(lab, 1.24, 0.12, 0.62, glow(0x9fd8ff, 0.7), 0, 0.2, 0);
-  box(lab, 0.5, 0.18, 0.4, glow(0xbfe8ff, 0.5), 0.3, 0.45, 0);
-  box(lab, 0.2, 0.3, 0.02, mat(0x2b3240), -0.4, 0, 0.31);
+  const k = kitOf(lab);
+  hollow(k, { w: 1.3, d: 0.6, h: 0.45, floors: 1, wall: 0xecebe6, inner: 0xf6f6f2, doors: { '+z': -0.4 }, furnish: 'lab', floorCol: 0xc8ccd0, seed: 25 });
+  faceBands(k, 1.3, 0.6, 0, 0, 0.2, 0.12, 0x9fd8ff, { out: 0.006, glow: true });
+  k.box(0.5, 0.18, 0.4, 0.3, 0.45, 0, 0xbfe8ff, { glow: true });
   // Antenne de télémétrie
   const ant = structure(g, 1.0, -0.6, 0, false);
   cyl(ant, 0.02, 0.03, 0.6, 6, mat(0x9aa4ad), 0, 0, 0);
   add(ant, new THREE.SphereGeometry(0.18, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3), mat(0xe8e8e8, { side: THREE.DoubleSide }), 0, 0.68, 0, [Math.PI * 0.8, 0, 0]);
-  for (const [x, z] of [[-1.3, 0.6], [1.2, 0.9]]) tree(structure(g, x, z, 0, false), 0, 0, 0, 1, 0x557f42);
+  ant.userData.colliders = { boxes: [], cyls: [[0, 0, 0.035, -0.05, 0.6]], rings: [] };
+  for (const [x, z] of [[-1.3, 0.6], [1.2, 0.9]]) treeAt(g, x, z, 1, 0x557f42);
   return g;
 }

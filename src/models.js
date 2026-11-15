@@ -608,63 +608,9 @@ export function createShip() {
     mats.forEach((m) => { m.uniforms.uTime.value = t; m.uniforms.uThrust.value = k; });
     halo.material.opacity = 0.25 + 0.6 * k;
     halo.scale.setScalar(0.6 + k * 0.8);
-  };
-  return g;
-}
-
-// ---------------------------------------------------------------------------
-// Véhicule tout-terrain amphibie (avant vers +Z, haut vers +Y, hauteur de roue ≈ 0,22)
-// ---------------------------------------------------------------------------
-export function createRover() {
-  const g = new THREE.Group();
-  const body = mat(0xe9dcc2), orange = mat(0xe07a3a), dark = mat(0x2a2622), metal = mat(0x8f969c), wood = mat(0x8a5a36);
-  // Caisse et flotteurs latéraux (amphibie)
-  const hull = add(g, new THREE.BoxGeometry(0.62, 0.22, 1.05), body, 0, 0.36, 0);
-  hull.scale.set(1, 1, 1);
-  add(g, new THREE.BoxGeometry(0.66, 0.05, 1.1), orange, 0, 0.27, 0);
-  for (const sx of [-1, 1]) {
-    const f = add(g, new THREE.CylinderGeometry(0.09, 0.09, 1.0, 12), wood, sx * 0.36, 0.33, 0, [Math.PI / 2, 0, 0]);
-    add(g, new THREE.SphereGeometry(0.09, 10, 8), wood, sx * 0.36, 0.33, 0.5);
-    f.userData.float = true;
-  }
-  // Cabine vitrée
-  const cab = add(g, new THREE.SphereGeometry(0.24, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x1d2a33, emissive: 0xffc27a, emissiveIntensity: 0.5, roughness: 0.2 }), 0, 0.47, 0.12);
-  cab.scale.set(1, 0.9, 1.25);
-  add(g, new THREE.TorusGeometry(0.24, 0.025, 6, 24), metal, 0, 0.47, 0.12, [Math.PI / 2, 0, 0]).scale.set(1, 1.25, 1);
-  // Phares et feux
-  for (const sx of [-1, 1]) {
-    add(g, new THREE.SphereGeometry(0.04, 8, 6), glow(0xfff0c0, 4), sx * 0.2, 0.38, 0.53);
-    add(g, new THREE.SphereGeometry(0.025, 6, 6), glow(0xff4a3a, 3), sx * 0.24, 0.38, -0.53);
-  }
-  // Antenne avec fanion
-  cyl(g, 0.008, 0.008, 0.5, 5, metal, -0.22, 0.47, -0.38);
-  box(g, 0.12, 0.07, 0.005, orange, -0.16, 0.9, -0.38);
-  // Hélice arrière pour la navigation sur l'eau
-  const prop = new THREE.Group(); prop.position.set(0, 0.3, -0.58); g.add(prop);
-  for (let i = 0; i < 3; i++) {
-    const b = add(prop, new THREE.BoxGeometry(0.03, 0.14, 0.01), metal, 0, 0.06, 0);
-    b.parent.remove(b);
-    const h = new THREE.Group(); h.rotation.z = (i / 3) * Math.PI * 2; h.add(b); prop.add(h);
-  }
-  // Six roues à gros pneus
-  const wheels = [];
-  for (const z of [-0.36, 0, 0.36]) {
-    for (const sx of [-1, 1]) {
-      const w = new THREE.Group(); w.position.set(sx * 0.38, 0.13, z); g.add(w);
-      const tire = add(w, new THREE.CylinderGeometry(0.13, 0.13, 0.11, 14), dark, 0, 0, 0, [0, 0, Math.PI / 2]);
-      add(w, new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), metal, 0, 0, 0, [0, 0, Math.PI / 2]);
-      for (let k = 0; k < 6; k++) {
-        const lug = add(w, new THREE.BoxGeometry(0.115, 0.03, 0.03), dark, 0, 0, 0);
-        lug.position.set(0, Math.cos((k / 6) * Math.PI * 2) * 0.13, Math.sin((k / 6) * Math.PI * 2) * 0.13);
-        lug.rotation.x = (k / 6) * Math.PI * 2;
-      }
-      tire.userData.wheel = true;
-      wheels.push(w);
-    }
-  }
-  g.userData.roll = (dist, wheelR = 0.13) => {
-    wheels.forEach((w) => { w.rotation.x += dist / wheelR; });
-    prop.rotation.z += dist * 40;
+    // Moteurs coupés (vaisseau posé) : aucune flamme ni lueur
+    const on = k > 0.005;
+    [main, inner, ...sides, halo, sparks].forEach((o) => { o.visible = on; });
   };
   return g;
 }
