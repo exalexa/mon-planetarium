@@ -1,7 +1,7 @@
 // La vie sur les astres : habitants et animaux qui discutent, feux de camp, objets à manipuler,
 // instruments pilotables. Tout est placé une fois les sols et les bâtiments en place.
 import * as THREE from 'three';
-import { Kit } from './kit.js';
+import { Kit, plain } from './kit.js';
 import { clunyDir, meudonMapDir } from './landmarks.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -29,7 +29,7 @@ function person(o = {}) {
   if (o.hat === 'hood') k.box(0.36, 0.36, 0.34, 0, 1.46, -0.02, coat, c);
   if (o.deco) for (let i = 0; i < 5; i++) k.box(0.05, 0.05, 0.01, -0.14 + i * 0.07, 1.2 - (i % 2) * 0.1, 0.135, [0xd8a53a, 0xb8423a, 0x3f7fb5, 0xe8e2d0, 0x4c8a4f][i], c);
   if (o.badge) k.box(0.1, 0.07, 0.01, 0.1, 1.18, 0.135, o.badge, c);
-  k.build(g);
+  k.build(g); plain(g);
   return g;
 }
 function animal(kind) {
@@ -51,7 +51,7 @@ function animal(kind) {
   else if (kind === 'pigeon') { k.sphere(0.12, 0, 0.16, 0, 0x7d8794, { seg: 6, sy: 0.8 }); k.sphere(0.06, 0, 0.3, 0.09, 0x56606e, { seg: 6 }); }
   else if (kind === 'chouette') { k.sphere(0.16, 0, 0.2, 0, 0x8a6f52, { seg: 6, sy: 1.2 }); k.sphere(0.13, 0, 0.42, 0.02, 0xa88a68, { seg: 6 }); for (const sx of [-1, 1]) k.box(0.05, 0.05, 0.01, sx * 0.05, 0.42, 0.13, 0xf0d060, { collide: false, glow: true }); }
   else if (kind === 'robot') { k.box(0.4, 0.4, 0.4, 0, 0.18, 0, 0xc9ced6, c); k.sphere(0.16, 0, 0.72, 0, 0xe8ecf2, { seg: 8 }); k.box(0.2, 0.05, 0.01, 0, 0.72, 0.15, 0x59e0ff, { collide: false, glow: true }); for (const sx of [-1, 1]) k.cyl(0.09, 0.09, 0.08, sx * 0.24, 0.06, 0, 0x30343a, c); }
-  k.build(g);
+  k.build(g); plain(g);
   return g;
 }
 function campfire() {
@@ -60,7 +60,7 @@ function campfire() {
   for (let i = 0; i < 3; i++) k.box(0.7, 0.1, 0.1, 0, 0.02 + i * 0.03, 0, 0x5a3a22, { collide: false, rotY: (i / 3) * Math.PI });
   // Bûches-sièges, comme autour de tout bon feu
   for (const [x, z] of [[1.4, 0.3], [-1.2, 0.9]]) k.box(0.9, 0.3, 0.32, x, 0, z, 0x6b4a30, { collide: false, rotY: Math.atan2(x, z) });
-  k.build(g);
+  k.build(g); plain(g);
   const flame = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.8, 6), new THREE.MeshBasicMaterial({ color: 0xff9a3c }));
   flame.position.y = 0.5; flame.userData.noToon = true;
   const core = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.5, 6), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
@@ -73,7 +73,7 @@ function signpost(color = 0xd8a53a) {
   const k = new Kit(), g = new THREE.Group(), c = { collide: false };
   k.box(0.08, 1.5, 0.08, 0, 0, 0, 0x5a3a22, c);
   k.box(0.8, 0.3, 0.05, 0.2, 1.15, 0, color, c);
-  k.build(g);
+  k.build(g); plain(g);
   return g;
 }
 

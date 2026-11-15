@@ -81,14 +81,15 @@ export function stepWalker(w, W, input, dt) {
   right.crossVectors(w.heading, up).normalize();
   wish.set(0, 0, 0).addScaledVector(w.heading, input.fwd || 0).addScaledVector(right, input.strafe || 0);
   if (wish.lengthSq() > 1) wish.normalize();
-  const speed = (input.run ? PERSON.run : PERSON.walk) * m * (w.swim ? 0.5 : 1);
+  // À pied ou au volant de l'amphibie (plus rapide, et qui flotte)
+  const speed = w.veh ? (input.run ? 17 : 9) * m * (w.swim ? 0.7 : 1) : (input.run ? PERSON.run : PERSON.walk) * m * (w.swim ? 0.5 : 1);
   vt.copy(w.v).addScaledVector(up, -w.v.dot(up));
   let vr = w.v.dot(up);
-  if (w.onGround || w.swim) vt.lerp(wish.multiplyScalar(speed), Math.min(1, dt * (w.onGround ? 12 : 4)));
+  if (w.onGround || w.swim) vt.lerp(wish.multiplyScalar(speed), Math.min(1, dt * (w.veh ? 2.5 : w.onGround ? 12 : 4)));
   else { vt.addScaledVector(wish, speed * dt * 1.2); if (vt.length() > speed) vt.setLength(speed); }
   vr -= PERSON.g * m * dt;
-  if (input.jump && w.onGround) { vr = PERSON.jump * m; w.onGround = false; }
-  if (w.swim) { vr = input.jump ? 1.6 * m : Math.max(vr, -1.0 * m) * 0.9; }
+  if (input.jump && w.onGround && !w.veh) { vr = PERSON.jump * m; w.onGround = false; }
+  if (w.swim) { vr = input.jump && !w.veh ? 1.6 * m : Math.max(vr, -1.0 * m) * 0.9; }
   np.copy(w.p).addScaledVector(vt, dt).addScaledVector(up, vr * dt);
   // Bâtiments et objets proches
   const st = { floor: -Infinity, ceil: Infinity };
@@ -132,9 +133,10 @@ export function stepWalker(w, W, input, dt) {
   w.swim = false;
   if (W.water) {
     W.water.query(dir, wq);
-    if (wq.r > 0 && wq.r > ground + 1.25 * m && feet < wq.r - 1.25 * m) {
+    const dr = w.veh ? 0.45 : 1.25;
+    if (wq.r > 0 && wq.r > ground + dr * m && feet < wq.r - dr * m) {
       w.swim = true;
-      feet = Math.max(feet, wq.r - 1.35 * m);
+      feet = Math.max(feet, wq.r - (dr + 0.1) * m);
       w.onGround = false;
     }
   }

@@ -48,6 +48,9 @@ function prep(geo, color) {
 
 export const kitSolid = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
 kitSolid.userData.tex = 1;
+// Même matière sans appareil de pierre : personnages, véhicules, coques, mobilier
+export const kitPlain = kitSolid.clone(); kitPlain.userData.tex = 4;
+export function plain(g) { g.traverse((o) => { if (o.material === kitSolid) o.material = kitPlain; }); return g; }
 export const kitGlow = new THREE.MeshBasicMaterial({ vertexColors: true });
 kitGlow.color.setScalar(1.3);
 export const kitGlass = new THREE.MeshStandardMaterial({ color: 0xbfe3ff, transparent: true, opacity: 0.35, roughness: 0.1, metalness: 0.1, depthWrite: false });

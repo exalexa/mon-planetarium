@@ -10,6 +10,8 @@ import {
 import { createShip, globularCluster } from './models.js';
 import { populate, THEMES } from './cover.js';
 import { stepWalker, walkerView, PERSON } from './walker.js';
+import { buildInterior, buildRover } from './shipdeck.js';
+import { U as KIT_U } from './kit.js';
 import { createCockpit, glitchify, flickerGlitch, glitchTspans, updateVHS } from './cockpit.js';
 import { createLandmarkMoon } from './landmarks.js';
 import { SYSTEM, flattenSystem } from './system.js';
@@ -311,7 +313,11 @@ function toToon(m) {
           float bx = uv.x / 0.85 + mod(row, 2.0) * 0.5 + h21(vec2(row, 3.0)) * 0.3;
           vec2 f = vec2(fract(bx), fract(uv.y / 0.42));
           float joint = smoothstep(0.0, 0.05, f.x) * smoothstep(0.0, 0.09, f.y);
-          return (0.82 + 0.18 * joint) * (0.9 + 0.2 * h21(vec2(floor(bx), row))) * (0.95 + 0.1 * vn(uv * 3.0));
+          // Pierres inégales, coulures sous les corniches, quelques moellons plus sombres
+          float tone = h21(vec2(floor(bx), row));
+          float stain = vn(vec2(uv.x * 1.3, uv.y * 0.16));
+          float dark = step(0.93, h21(vec2(floor(bx) + 7.0, row + 3.0)));
+          return (0.8 + 0.2 * joint) * (0.88 + 0.22 * tone) * (0.93 + 0.1 * vn(uv * 4.0)) * (0.9 + 0.14 * stain) * (1.0 - 0.1 * dark);
         } else if (n.y < 0.97) {
           float along = n.x > n.z ? p.z : p.x;
           float row = p.y / 0.22;
@@ -322,8 +328,13 @@ function toToon(m) {
       #elif TEX_KIND == 2
         vec3 p = vOP * uTexScale;
         float g = vn(p.xz + p.y * 1.7) * 0.6 + vn(p.zy * 3.1 + p.x * 2.3) * 0.4;
-        float sp = step(0.88, h21(floor(p.xz * 6.0 + p.y * 6.0)));
-        return 0.84 + 0.28 * g - 0.06 * sp;
+        // Sol : grandes taches, grain fin, cailloux épars
+        float fine = vn(p.xz * 9.0 + p.y * 7.0);
+        float sp = step(0.9, h21(floor(p.xz * 6.0 + p.y * 6.0)));
+        return 0.8 + 0.26 * g + 0.1 * fine - 0.07 * sp;
+      #elif TEX_KIND == 4
+        vec3 p = vOP * uTexScale;
+        return 0.93 + 0.12 * vn(p.xy * 5.0 + p.z * 4.0);
       #elif TEX_KIND == 3
         vec3 p = vOP * uTexScale;
         float w = vn(p.xz * 1.5 + uTexTime * 0.35 + p.y) + vn(p.zy * 2.3 - uTexTime * 0.28 + p.x);
@@ -1531,12 +1542,65 @@ document.querySelectorAll('#flight-pad button').forEach((btn) => {
 });
 
 // Touche E : sortir du vaisseau une fois posé, remonter à bord, ou regarder dans la lunette
+// ---- Vaisseau posé : intérieur visitable, rampe de soute et amphibie ----
+// Longueur du vaisseau posé, à l'échelle du personnage : assez grand pour abriter cabine et soute
+const SHIP_M = 22;
+let deck = null;
+function placeRover(R, W) {
+  const up = R.p.clone().sub(W.center).normalize();
+  const f = R.heading.clone().addScaledVector(up, -R.heading.dot(up)).normalize();
+  R.obj.position.copy(R.p);
+  R.obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, f).normalize(), up, f));
+  R.obj.scale.setScalar(W.m2u);
+}
+function unmountDeck() {
+  if (!deck) return;
+  const W = deck.body.walk;
+  deck.group.removeFromParent(); deck.rover.obj.removeFromParent();
+  const i = W.groups.indexOf(deck.grp); if (i >= 0) W.groups.splice(i, 1);
+  deck = null;
+}
+function mountDeck() {
+  const L = free.landed;
+  if (!L) return null;
+  if (deck && deck.body === L.body) return deck;
+  unmountDeck();
+  const b = L.body, W = b.walk, obj = b.obj;
+  const info = buildInterior(SHIP_M / shipLength());
+  toonify(info.group);
+  // Repère du vaisseau posé, exprimé dans celui de l'astre
+  obj.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const upL = L.localUp.clone().normalize();
+  const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion).transformDirection(inv);
+  fw.addScaledVector(upL, -fw.dot(upL)).normalize();
+  const x = new THREE.Vector3().crossVectors(upL, fw).normalize();
+  const s = W.m2u / KIT_U;
+  const pos = L.ground.clone().addScaledVector(upL, info.FY * W.m2u);
+  const m = new THREE.Matrix4().makeBasis(x, upL, fw).scale(new THREE.Vector3(s, s, s)).setPosition(pos);
+  info.group.matrixAutoUpdate = false; info.group.matrix.copy(m); info.group.name = 'deck';
+  obj.add(info.group);
+  const grp = { m, inv: m.clone().invert(), s, center: pos.clone(), radius: 16 * W.m2u, col: info.group.userData.colliders };
+  W.groups.push(grp);
+  const rover = buildRover(); toonify(rover); rover.name = 'rover';
+  obj.add(rover);
+  deck = { body: b, group: info.group, grp, info, fw, rover: { obj: rover, p: info.bay.clone().applyMatrix4(m), heading: x.clone(), out: false } };
+  placeRover(deck.rover, W);
+  return deck;
+}
+const deckLocal = (w) => (deck && deck.body === w.body ? w.p.clone().applyMatrix4(deck.grp.inv) : null);
 function freeAction() {
   if (mode !== 'free') return;
   const w = free.walker;
   if (w) {
     const W = w.body.walk;
     if (w.scope) { w.scope = null; hint('', 0); return; }
+    if (w.veh) { w.veh = false; deck.rover.out = true; w.p.addScaledVector(new THREE.Vector3().crossVectors(w.heading, w.p.clone().sub(W.center).normalize()).normalize(), 1.6 * W.m2u); hint('Amphibie garé · E à côté pour remonter dedans', 4); return; }
+    if (deck && deck.body === w.body && deck.rover.p.distanceTo(w.p) < 3 * W.m2u) {
+      w.veh = true; w.p.copy(deck.rover.p); w.heading.copy(deck.rover.heading); w.v.set(0, 0, 0);
+      hint('Amphibie : Z / S avancer et reculer, Q / D tourner, Maj pour accélérer · il flotte · E pour descendre', 8);
+      return;
+    }
     if (nearScope(w)) { enterScope(w, { big: true, name: 'Grande lunette · Meudon' }); return; }
     const it = life?.nearest(w);
     if (it) {
@@ -1544,32 +1608,25 @@ function freeAction() {
       else life.use(it);
       return;
     }
-    const shipLocal = w.body.obj.worldToLocal(ship.position.clone());
-    if (shipLocal.distanceTo(w.p) < 12 * W.m2u) {
+    const dl = deckLocal(w);
+    if (dl && deck.info.inside(dl) && dl.distanceTo(deck.info.seat) < 1.5 * KIT_U && !w.veh) {
       leaveWalker();
       syncLayout();
-      hint('De retour à bord · Espace ou Z pour décoller', 5);
-    } else hint('Rapprochez-vous du vaisseau pour remonter à bord', 3);
+      hint('Aux commandes · Espace ou Z pour décoller', 5);
+    } else hint(w.veh ? '' : 'Le poste de pilotage est à l’avant du vaisseau : montez par la rampe', 3);
     return;
   }
   if (!free.landed) { hint('Posez-vous d’abord sur une surface solide', 3); return; }
   const b = free.landed.body;
   if (!b.walk) { hint(`On ne peut pas marcher sur ${b.name}`, 3); return; }
   const W = b.walk, obj = b.obj;
-  // Le personnage descend à côté du vaisseau
-  const shipLocal = obj.worldToLocal(ship.position.clone());
-  const upL = shipLocal.clone().sub(W.center).normalize();
-  const fwdW = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
-  const fwdL = fwdW.transformDirection(new THREE.Matrix4().copy(obj.matrixWorld).invert());
-  const side = new THREE.Vector3().crossVectors(upL, fwdL).normalize();
-  const p = shipLocal.clone().addScaledVector(side, 7 * W.m2u);
-  const dir = p.clone().sub(W.center).normalize();
-  const q = {}; W.sampler.query(dir, q);
-  p.copy(W.center).addScaledVector(dir, (q.r > 0 ? q.r : p.distanceTo(W.center)) + 0.3 * W.m2u);
-  free.walker = { body: b, p, v: new THREE.Vector3(), heading: fwdL.clone().addScaledVector(dir, -fwdL.dot(dir)).normalize(), pitch: -0.05, onGround: false, swim: false, scope: false };
+  // On se lève du siège : le personnage est dans la cabine, la rampe de soute est à tribord
+  const dk = mountDeck();
+  const p = dk.info.spawn.clone().applyMatrix4(dk.grp.m);
+  free.walker = { body: b, p, v: new THREE.Vector3(), heading: dk.fw.clone().negate(), pitch: -0.05, onGround: false, swim: false, scope: false, veh: false };
   user.yaw = user.tYaw = user.pitch = user.tPitch = 0;
   syncLayout();
-  hint('À pied : ZQSD pour marcher, souris ou flèches pour regarder, Espace pour sauter, Maj pour courir · E près du vaisseau pour remonter', 9);
+  hint('Dans le vaisseau : la rampe est à tribord, l’amphibie dans la soute · E au poste de pilotage pour reprendre les commandes', 9);
 }
 // Cibles des instruments : l'amas, le Soleil, les planètes et les galaxies du ciel
 const GALAXY_NAMES = ['Galaxie d’Andromède · M31', 'Galaxie du Tourbillon · M51', 'Galaxie du Triangle · M33', 'Galaxie du Sombrero · M104', 'Galaxie de Bode · M81', 'Galaxie du Moulinet · M101', 'Centaurus A · NGC 5128', 'Virgo A · M87', 'Galaxie de l’Aiguille · NGC 4565'];
@@ -1587,6 +1644,7 @@ function enterScope(w, it) {
   hint('Q / D : changer de cible · Z / S : zoom · souris : pointage fin · E : quitter', 7);
 }
 function leaveWalker() {
+  unmountDeck();
   if (!free.walker) return;
   free.walker = null;
   camera.near = 0.05; camera.updateProjectionMatrix();
@@ -1621,10 +1679,10 @@ function updateFree(dt) {
   if (free.anchor && !free.landed) free.pos.copy(bodyCenter(free.anchor)).add(free.offset);
   if (!free.landed) free.anchor = findAnchor(free.pos);
   let scaleTarget = free.anchor ? THREE.MathUtils.clamp(bodyRadius(free.anchor) * 0.12, 0.12, 0.9) : 0.9;
-  // Près d'un astre praticable, le vaisseau prend sa taille réelle (≈ 14 m) à l'échelle du personnage
+  // Près d'un astre praticable, le vaisseau prend sa taille réelle (≈ 22 m) à l'échelle du personnage
   const ref = free.landed?.body || free.anchor;
   if (ref?.walk && free.pos.distanceTo(bodyCenter(ref)) < bodyRadius(ref) * 4) {
-    scaleTarget = Math.min(scaleTarget, (14 * ref.walk.m2u * ref.obj.getWorldScale(tmpV).x) / shipLength());
+    scaleTarget = Math.min(scaleTarget, (SHIP_M * ref.walk.m2u * ref.obj.getWorldScale(tmpV).x) / shipLength());
   }
   free.shipScale += (scaleTarget - free.shipScale) * Math.min(1, dt * 2);
   ship.scale.setScalar(free.shipScale);
@@ -1826,7 +1884,9 @@ function updateWalker(dt) {
     free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, 0.9 * free.shipScale);
     ship.position.copy(free.pos);
   }
-  ship.visible = true;
+  // De l'intérieur, on ne voit pas la coque : seulement la cabine
+  const dl0 = deckLocal(w);
+  ship.visible = !(dl0 && deck.info.inside(dl0));
   ship.userData.setThrust(0, simTime);
   autoThrust = 0;
   pushTrail(ship.position, 0);
@@ -1885,8 +1945,21 @@ function updateWalker(dt) {
     pitch: ((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0)) * 1.4 * dt + lookIn.pitch,
   };
   lookIn.yaw = lookIn.pitch = 0;
+  if (w.veh) { input.yaw -= input.strafe * 1.5 * dt * (input.fwd < 0 ? -1 : 1); input.strafe = 0; }
   stepWalker(w, W, input, Math.min(dt, 0.05));
   walkerView(w, W, wEye, wLook, wUp);
+  if (w.veh && deck) {
+    // L'amphibie suit le conducteur ; caméra de poursuite au-dessus et en arrière
+    const R = deck.rover, upv = w.p.clone().sub(W.center).normalize();
+    R.p.copy(w.p); R.heading.copy(w.heading); R.out = true;
+    placeRover(R, W);
+    if (w.swim) R.obj.position.addScaledVector(upv, (0.25 + 0.06 * Math.sin(simTime * 2.2)) * W.m2u);
+    const inDeck = deck.info.inside(w.p.clone().applyMatrix4(deck.grp.inv));
+    if (inDeck) wEye.copy(w.p).addScaledVector(upv, 1.7 * W.m2u).addScaledVector(w.heading, -0.4 * W.m2u);
+    else wEye.copy(w.p).addScaledVector(upv, (3.2 - w.pitch * 3) * W.m2u).addScaledVector(w.heading, -7 * W.m2u);
+    wLook.copy(w.p).addScaledVector(upv, 1.3 * W.m2u).addScaledVector(w.heading, 3 * W.m2u);
+    wUp.copy(upv);
+  }
   obj.localToWorld(wEye); obj.localToWorld(wLook);
   wUp.transformDirection(obj.matrixWorld);
   camera.position.copy(wEye);
@@ -1905,14 +1978,16 @@ function updateWalker(dt) {
   // Indications
   if (hintTimer <= 0) {
     const shipLocal = obj.worldToLocal(ship.position.clone());
-    const it = life?.nearest(w);
+    const it = w.veh ? null : life?.nearest(w);
     if (nearScope(w)) hint('E : regarder dans la grande lunette', 0.3);
     else if (it) hint(`E : ${it.label}`, 0.3);
-    else if (shipLocal.distanceTo(w.p) < 12 * W.m2u) hint('E : remonter à bord du vaisseau', 0.3);
+    else if (w.veh) hint(w.swim ? 'L’amphibie flotte · E : descendre' : 'E : descendre de l’amphibie', 0.3);
+    else if (deck && deck.body === b && deck.rover.p.distanceTo(w.p) < 3 * W.m2u) hint('E : monter dans l’amphibie', 0.3);
+    else if (dl0 && deck.info.inside(dl0) && dl0.distanceTo(deck.info.seat) < 1.5 * KIT_U) hint('E : reprendre les commandes', 0.3);
     else if (w.swim) hint('À la nage', 0.3);
   }
   const sp = w.v.length() / W.m2u;
-  document.getElementById('free-speed').textContent = `${sp.toFixed(1)} m/s · à pied sur ${b.name}`;
+  document.getElementById('free-speed').textContent = `${sp.toFixed(1)} m/s · ${w.veh ? 'en amphibie' : 'à pied'} sur ${b.name}`;
   if (free.near !== b) { free.near = b; showBody(b); }
   updateTargetMarker();
   applyProjection(dt, 70);

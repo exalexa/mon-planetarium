@@ -284,6 +284,44 @@ const PREFABS = {
     k.box(M(0.3), M(0.3), M(0.3), 0, M(6), M(0.6), 0x7dffc8, { glow: true });
   } },
   // Végétation et décor
+  // ---- Petite végétation et minéraux (sans collision, semés en dernier) ----
+  herbe: { tree: true, plant: true, build(k) {
+    for (let i = 0; i < 9; i++) {
+      const a = i * 2.4, r = 0.12 + (i % 3) * 0.14, h = 0.45 + ((i * 7) % 5) * 0.11;
+      k.box(M(0.07), M(h), M(0.03), M(Math.cos(a) * r), -M(0.05), M(Math.sin(a) * r), [0x5f9a44, 0x74ad4f, 0x4f8a3c][i % 3], { collide: false, rotY: a, rotZ: 0.12 + (i % 4) * 0.08 });
+    }
+  } },
+  fougere: { tree: true, plant: true, build(k) {
+    for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2; k.box(M(0.9), M(0.03), M(0.26), M(Math.cos(a) * 0.4), M(0.28), M(-Math.sin(a) * 0.4), i % 2 ? 0x3f7a3a : 0x4c8a45, { collide: false, rotY: a, rotZ: 0.5 }); }
+  } },
+  buisson: { tree: true, plant: true, build(k) {
+    k.sphere(M(0.8), 0, M(0.5), 0, 0x3f7238, { seg: 6, sy: 0.8 });
+    k.sphere(M(0.55), M(0.6), M(0.55), M(0.2), 0x4c8442, { seg: 6 });
+    k.sphere(M(0.5), -M(0.5), M(0.45), -M(0.3), 0x356632, { seg: 5 });
+    for (const [x, y, z] of [[0.3, 0.9, 0.5], [-0.4, 0.8, -0.2], [0.7, 0.7, -0.1], [-0.1, 1.05, 0.3]]) k.box(M(0.09), M(0.09), M(0.09), M(x), M(y), M(z), 0xc23a4a, { collide: false });
+  } },
+  rocher: { tree: true, plant: true, build(k) {
+    k.sphere(M(0.75), 0, M(0.2), 0, 0x8d8a84, { seg: 5, sy: 0.65 });
+    k.sphere(M(0.45), M(0.6), M(0.12), M(0.3), 0x9a968e, { seg: 5, sy: 0.7 });
+    k.sphere(M(0.25), -M(0.55), M(0.05), M(0.5), 0x7d7a75, { seg: 4, sy: 0.7 });
+  } },
+  champignon: { tree: true, plant: true, build(k) {
+    for (const [x, z, s] of [[0, 0, 1], [0.3, 0.2, 0.7], [-0.2, 0.3, 0.55]]) {
+      k.cyl(M(0.05 * s), M(0.07 * s), M(0.3 * s), M(x), 0, M(z), 0xf1ead8, { seg: 6, collide: false });
+      k.sphere(M(0.2 * s), M(x), M(0.3 * s), M(z), 0xc8402e, { seg: 7, half: true });
+    }
+  } },
+  ...Object.fromEntries([['paquerette', 0xf6f3ea, 0xf2c94c], ['coquelicot', 0xd8342c, 0x2a2420], ['bleuet', 0x5a78d8, 0xe8e2f8], ['bouton-or', 0xf2c530, 0xe0a020]].map(([name, petal, heart]) => [name, { tree: true, plant: true, build(k) {
+    for (let i = 0; i < 6; i++) {
+      const a = i * 1.9, r = 0.1 + (i % 3) * 0.2, h = 0.3 + (i % 4) * 0.08, x = Math.cos(a) * r, z = Math.sin(a) * r;
+      k.box(M(0.025), M(h), M(0.025), M(x), 0, M(z), 0x4f8a3c, { collide: false });
+      k.box(M(0.16), M(0.04), M(0.16), M(x), M(h), M(z), petal, { collide: false, rotY: a });
+      k.box(M(0.06), M(0.06), M(0.06), M(x), M(h + 0.01), M(z), heart, { collide: false });
+    }
+  } }])),
+  roseau: { tree: true, plant: true, build(k) {
+    for (let i = 0; i < 7; i++) { const a = i * 2.1, r = 0.1 + (i % 3) * 0.12; k.box(M(0.04), M(1.5 + (i % 3) * 0.3), M(0.04), M(Math.cos(a) * r), -M(0.1), M(Math.sin(a) * r), 0x8a9a4a, { collide: false, rotZ: 0.04 * (i - 3) }); if (i % 2) k.box(M(0.08), M(0.3), M(0.08), M(Math.cos(a) * r), M(1.3), M(Math.sin(a) * r), 0x5a3a22, { collide: false }); }
+  } },
   feuillu: { tree: true, build(k, s, rnd) {
     k.cyl(M(0.22), M(0.34), M(3.4), 0, -M(0.4), 0, 0x5a3d26, { seg: 6 });
     k.sphere(M(2.3), 0, M(4.6), 0, 0x4c7a3d, { seg: 7 });
@@ -562,7 +600,7 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
     const sc = def.tree ? S * (0.8 + rnd() * 0.45) : S;
     const mat = new THREE.Matrix4().compose(pos, qTmp, sTmp.set(sc, sc, sc));
     (instances[name] || (instances[name] = [])).push(mat);
-    occupied.push({ dir: dir.clone(), ang: def.tree ? ang * 0.35 : ang });
+    if (!def.plant) occupied.push({ dir: dir.clone(), ang: def.tree ? ang * 0.35 : ang });
     if (P.colliders.boxes.length || P.colliders.cyls.length || P.colliders.rings.length) {
       colliders.push({ m: mat, s: sc, center: pos, radius: P.radius * sc, col: P.colliders });
     }
@@ -629,6 +667,20 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
   }
   // Maillages instanciés
   const col = new THREE.Color();
+  // Végétation basse : herbes, fleurs des champs, fougères et buissons, rochers ; roseaux près de l'eau
+  {
+    const BARREN = ['ceres', 'pluton', 'charon', 'eris', 'haumea', 'makemake', 'station', 'petra', 'ricochet', 'glenos'];
+    const kk = Math.min(3, Math.max(0.5, (R / m2u) / 75) ** 2);
+    const list = theme.plants || (BARREN.includes(b.id)
+      ? [['rocher', 120]]
+      : [['herbe', 900], ['paquerette', 130], ['coquelicot', 80], ['bleuet', 60], ['bouton-or', 90], ['fougere', 140], ['buisson', 110], ['rocher', 70], ['champignon', 40]]);
+    for (const [name, n, zone] of list) {
+      const N = Math.round(n * kk);
+      for (let i = 0, t = 0; i < N && t < N * 4; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, 0.2, zone)) i++;
+    }
+    for (const L of lakes) for (let i = 0; i < 26; i++) tryPlace('roseau', near(L.dir, L.ang * 1.15), rnd() * 6.28, 0.2);
+  }
+
   for (const [name, mats] of Object.entries(instances)) {
     const P = prefab(name);
     for (const [geo, mtl] of [[P.solid, kitSolid], [P.glow, kitGlow], [P.glass, kitGlass]]) {
