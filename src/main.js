@@ -277,6 +277,7 @@ const gradientMap = (() => {
   return t;
 })();
 const toonCache = new Map();
+const texTime = { value: 0 };
 function toToon(m) {
   if (!m || !(m.isMeshStandardMaterial || m.isMeshPhysicalMaterial || m.isMeshLambertMaterial)) return m;
   if (toonCache.has(m)) return toonCache.get(m);
@@ -287,11 +288,62 @@ function toToon(m) {
   });
   // Les métaux deviennent des aplats un peu plus clairs (pas de reflets réalistes)
   if (m.metalness > 0.4) t.color.offsetHSL(0, -0.05, 0.08);
+  // Matières procédurales (appareil de pierre et rangs de tuiles, grain du sol, rides de l'eau),
+  // calculées dans le repère de l'objet et estompées avec la distance
+  const kind = m.userData.tex || 0;
+  t.defines = { TEX_KIND: kind };
   t.onBeforeCompile = (shader) => {
+    shader.uniforms.uTexScale = { value: m.userData.texScale || 18.42 };
+    shader.uniforms.uTexTime = texTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\n#include <common>')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n vOP = position; vON = normal;');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec3 vOP; varying vec3 vON; uniform float uTexScale; uniform float uTexTime;
+      float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y); }
+      float texK() {
+      #if TEX_KIND == 1
+        vec3 p = vOP * uTexScale; vec3 n = abs(vON);
+        if (n.y < 0.35) {
+          vec2 uv = n.x > n.z ? p.zy : p.xy;
+          float row = floor(uv.y / 0.42);
+          float bx = uv.x / 0.85 + mod(row, 2.0) * 0.5 + h21(vec2(row, 3.0)) * 0.3;
+          vec2 f = vec2(fract(bx), fract(uv.y / 0.42));
+          float joint = smoothstep(0.0, 0.05, f.x) * smoothstep(0.0, 0.09, f.y);
+          return (0.82 + 0.18 * joint) * (0.9 + 0.2 * h21(vec2(floor(bx), row))) * (0.95 + 0.1 * vn(uv * 3.0));
+        } else if (n.y < 0.97) {
+          float along = n.x > n.z ? p.z : p.x;
+          float row = p.y / 0.22;
+          vec2 f = vec2(fract(along / 0.3 + mod(floor(row), 2.0) * 0.5), fract(row));
+          return (0.8 + 0.2 * smoothstep(0.0, 0.3, f.y)) * (0.9 + 0.2 * h21(vec2(floor(along / 0.3), floor(row)))) * (0.88 + 0.12 * smoothstep(0.0, 0.14, f.x));
+        }
+        return 0.92 + 0.14 * vn(p.xz * 2.0);
+      #elif TEX_KIND == 2
+        vec3 p = vOP * uTexScale;
+        float g = vn(p.xz + p.y * 1.7) * 0.6 + vn(p.zy * 3.1 + p.x * 2.3) * 0.4;
+        float sp = step(0.88, h21(floor(p.xz * 6.0 + p.y * 6.0)));
+        return 0.84 + 0.28 * g - 0.06 * sp;
+      #elif TEX_KIND == 3
+        vec3 p = vOP * uTexScale;
+        float w = vn(p.xz * 1.5 + uTexTime * 0.35 + p.y) + vn(p.zy * 2.3 - uTexTime * 0.28 + p.x);
+        return 0.9 + 0.25 * smoothstep(1.1, 1.6, w);
+      #else
+        return 1.0;
+      #endif
+      }`);
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
       `float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
        outgoingLight += vec3(0.62, 0.72, 1.0) * rim * 0.22;
+       #if TEX_KIND == 1
+         // Le feuillage (vert) reçoit un moutonnement plutôt que des assises de pierre
+         float veg = step(vColor.r * 1.06, vColor.g) * step(vColor.b, vColor.g);
+         float leaf = 0.86 + 0.24 * vn(vOP.xz * uTexScale * 1.6 + vOP.y * uTexScale * 1.3);
+         outgoingLight *= mix(1.0, mix(texK(), leaf, veg), 1.0 - smoothstep(4.0, 16.0, length(vViewPosition)));
+       #elif TEX_KIND > 1
+         outgoingLight *= texK();
+       #endif
        #include <opaque_fragment>`
     );
   };
@@ -477,6 +529,7 @@ function buildSystem(gltf) {
 // Astres praticables à pied : peuplement (villages, forêts, lacs) et données de collision
 // ---------------------------------------------------------------------------
 const WATER_MAT = new THREE.MeshStandardMaterial({ color: 0x3a8fc0, roughness: 0.22, metalness: 0.1, emissive: 0x0b2c44, emissiveIntensity: 0.35, transparent: true, opacity: 0.9 });
+WATER_MAT.userData.tex = 3; WATER_MAT.userData.texScale = 9;
 function terrainCentroid(obj) {
   obj.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
@@ -1282,6 +1335,7 @@ function syncLayout() {
   btn.textContent = views[mode] === 'fpv' ? 'Vue cockpit' : 'Vue extérieure';
   btn.classList.toggle('fpv', views[mode] === 'fpv');
   document.body.classList.toggle('walking', mode === 'free' && !!free.walker);
+  document.body.classList.toggle('free-mode', mode === 'free');
   document.body.classList.toggle('tpv-screens', tpvScreens());
   document.body.classList.toggle('free-tpv', mode === 'free' && views.free === 'tpv' && !free.walker);
   if ((cockpitLayout() || tpvScreens()) && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
@@ -2231,6 +2285,7 @@ function frame() {
   if (ready) {
     placeBodies(dt);
     updateTelescope(dt);
+    texTime.value = simTime;
     for (const f of ticks) f(simTime);
   life?.update(dt, simTime, mode === 'free' ? free.walker : null);
     updateSpaceWeather(dt);

@@ -1000,3 +1000,6 @@ body.free-tpv:not(.show-info) :is(#astro-info-container, #explore-tree, #free-he
 
 /* Soleil au cœlostat : filtre Hα */
 #eyepiece.sun .eyepiece-ring { background: radial-gradient(circle, rgba(255, 70, 20, 0.16), rgba(150, 0, 0, 0.3)); }
+
+/* Vol libre : ni fiche de l'astre ni journal de bord (I pour les afficher) */
+body.free-mode:not(.show-info) :is(#astro-info-container, #explore-tree, .astro-label) { display: none !important; }

@@ -89,39 +89,39 @@ const LIFE = {
   cluny: {
     at: (x, z) => clunyDir(x, z),
     groups: [
-      { at: [5, 6], who: [{ name: 'Ancien', ...GADZ, hat: 'beret' }, { name: 'Conscrit', ...GADZ, deco: false, seed: 1 }], lines: [
+      { at: [2, 4], who: [{ name: 'Ancien', ...GADZ, hat: 'beret' }, { name: 'Conscrit', ...GADZ, deco: false, seed: 1 }], lines: [
         [0, 'Conscrit ! Ta biaude est encore toute grise. Il va falloir la décorer avant le Baptême.'],
         [1, 'Oui, l’Ancien. Ma fam’s m’aide à broder ma bucque dans le dos.'],
         [0, 'Bien. Et les chants ? L’hymne des Gadz’Arts, tu le connais par cœur ?'],
         [1, 'Par cœur. On l’a répété tout l’usinage, dans le cloître, à la nuit tombée.'],
         [0, 'Alors tu sais l’essentiel : ici on entre seul, on ressort en promo. Fraternité.'],
       ] },
-      { at: [84, 8], who: [{ name: 'Gadz’Arts', ...GADZ, seed: 2 }, { name: 'Chef d’atel’s', coat: 0x2f4f7a, hat: 'cap', seed: 3 }], lines: [
+      { at: [120, -40], who: [{ name: 'Gadz’Arts', ...GADZ, seed: 2 }, { name: 'Chef d’atel’s', coat: 0x2f4f7a, hat: 'cap', seed: 3 }], lines: [
         [0, 'Aux atel’s, le tour ne pardonne rien : un dixième de trop et la pièce part au rebut.'],
         [1, 'Fonderie, forge, usinage… Depuis 1901 on apprend ici le métier avec les mains autant qu’avec la tête.'],
         [0, 'Et le soir, zaloeil aux KIN, puis on file en salle d’étude. Enfin, en théorie.'],
         [1, 'En théorie. Range ta zagette et remets tes lunettes de protection.'],
       ] },
-      { at: [-62, -60], who: [{ name: 'Guide', coat: 0x7a5a3c, seed: 1 }, { name: 'Visiteuse', coat: 0xb5524a, seed: 3 }], lines: [
+      { at: [-50, -86], who: [{ name: 'Guide', coat: 0x7a5a3c, seed: 1 }, { name: 'Visiteuse', coat: 0xb5524a, seed: 3 }], lines: [
         [0, 'Vous marchez dans la nef de Cluny III, la Maior Ecclesia : 187 mètres de long.'],
         [1, 'Et il n’en reste que ça ?'],
         [0, 'Après la Révolution, elle a servi de carrière de pierres. Seuls le bras sud du transept et le clocher de l’Eau-Bénite sont debout.'],
         [1, 'La plus grande église de la chrétienté, jusqu’à Saint-Pierre de Rome… vendue au mètre cube.'],
       ] },
-      { at: [-246, 18], who: [{ name: 'Clunisoise', coat: 0x6f8a5a, seed: 2 }, { name: 'Vigneron', coat: 0x7a3a4a, hat: 'beret', seed: 0 }], lines: [
-        [0, 'Du haut de la tour des Fromages, on voit toute l’abbaye. On y faisait sécher les fromages, paraît-il.'],
+      { at: [-64, -30], who: [{ name: 'Clunisoise', coat: 0x6f8a5a, seed: 2 }, { name: 'Vigneron', coat: 0x7a3a4a, hat: 'beret', seed: 0 }], lines: [
+        [0, 'Montez à la tour des Fromages : de là-haut, on voit la zapointe, les atel’s et la zaronde. On y faisait sécher les fromages, paraît-il.'],
         [1, 'Et de mes vignes, on voit la tour. Chardonnay du Mâconnais, vendangé à la main.'],
         [0, 'Les Gadz’Arts défilent encore en ville cette semaine ?'],
         [1, 'Un monôme en biaude jusqu’à la place de l’Abbaye. On les entend chanter depuis les coteaux.'],
       ] },
     ],
-    animals: [['cheval', [-20, -106], 'Un cheval du Haras national. Il renifle votre poche, au cas où.'], ['cheval', [4, -108], 'Il s’ébroue. Le haras est installé ici depuis Napoléon.'],
-      ['chat', [22, 98], 'Le chat de l’abbaye dort sous le tilleul d’Abélard.'], ['mouton', [150, 210], 'Bêêê.'], ['vache', [330, -260], 'Une charolaise, placide, vous regarde passer.']],
-    fire: [62, 72],
+    animals: [['cheval', [205, -226], 'Un cheval du Haras national. Il renifle votre poche, au cas où.'], ['cheval', [222, -224], 'Il s’ébroue. Le haras est installé ici depuis Napoléon.'],
+      ['chat', [116, 66], 'Le chat de l’abbaye dort sous le tilleul d’Abélard.'], ['mouton', [330, 240], 'Bêêê.'], ['vache', [470, -330], 'Une charolaise, placide, vous regarde passer.']],
+    fire: [160, 72],
     props: [
-      { at: [38, -18], label: 'sonner la cloche de la tour de l’Horloge', say: ['Dong… Dong… La cloche résonne sur toute la vallée de la Grosne.', 'Dong ! Quelque part, un conscrit se réveille en sursaut.'] },
-      { at: [0, -1], label: 'tirer de l’eau au puits du cloître', say: ['L’eau est glacée. Les moines s’y lavaient avant d’entrer au réfectoire.'] },
-      { at: [-196, -60], sign: true, label: 'lire la plaque', say: ['« Arts et Métiers — Campus de Cluny. École installée dans l’abbaye depuis 1901. »', '« Cluny, 910. Fondée par Guillaume le Pieux, duc d’Aquitaine. »'] },
+      { at: [9, -30], label: 'sonner la cloche de la tour de l’Horloge', say: ['Dong… Dong… La cloche résonne sur toute la vallée de la Grosne.', 'Dong ! Quelque part, un conscrit se réveille en sursaut.'] },
+      { at: [-1.5, 2], label: 'boire au bassin du cloître', say: ['L’eau est glacée. Les moines s’y lavaient avant d’entrer au réfectoire.'] },
+      { at: [-62, -50], sign: true, label: 'lire la plaque', say: ['« Arts et Métiers — Campus de Cluny. École installée dans l’abbaye depuis 1901. »', '« Cluny, 910. Fondée par Guillaume le Pieux, duc d’Aquitaine. »'] },
     ],
   },
   meudon: {
@@ -151,7 +151,7 @@ const LIFE = {
     scopes: [
       { at: [292, 456], h: 0.56, name: 'Table équatoriale ouest' }, { at: [346, 474], h: 0.56, name: 'Table équatoriale' },
       { at: [394, 451], h: 0.56, name: 'Télescope de 1 mètre' }, { at: [485, 506], h: 0.56, name: 'Coupole du laser', laser: true },
-      { at: [240, 300], h: 2.25, name: 'Tour solaire · cœlostat', sun: true },
+      { at: [219, 298], h: 1.72, r: 30, name: 'Tour solaire · cœlostat', sun: true },
     ],
     props: [
       { at: [470, 540], label: 'écouter l’interféromètre', say: ['Dans le casque : le souffle du Soleil à 169 MHz, et un sursaut radio de type III qui dévale les fréquences.', 'Friture, puis un long sifflement descendant. Des électrons quittent la couronne.'] },
@@ -237,6 +237,7 @@ const WANDER = {
   proxion: ['Ingénieure', 'Tout ici est né d’un cahier des charges : une prothèse, un jumeau numérique, un réseau électrique.', 'RICOCHET ? Des galets, de la physique, et beaucoup d’essais ratés.'],
   astra: ['Astronome errant', 'Depuis MEUDON, on observe ω Centauri. Montez à la Grande Coupole et regardez dans la lunette.', 'GAIA et EUCLID veillent au point L2. Ils ne dorment jamais.'],
   musa: ['Musicienne', 'Écoutez : NOCTURNE joue encore. Il y a un piano sur la scène.', 'La photographie attend au point L3, toujours cachée derrière la planète.'],
+  station: ['Cheffe de station', 'Bienvenue à bord de la station E139. Quartiers au sud, atelier au nord, labo à l’est, baie d’amarrage à l’ouest.', 'La coupole du moyeu donne sur PERSION. On y monte par l’escalier central.', 'La serre produit nos tomates. Ne touchez pas aux tomates.'],
   ceres: ['Prospecteur', 'Rien que de la glace et du silence. Parfait pour réfléchir.'],
   glenos: ['Chirurgien', 'Une épaule, c’est une sphère dans une cavité trop petite. Tout l’art est de la faire tenir.'],
   enedis: ['Technicien réseau', 'Prédire la consommation d’un quartier à partir des courbes de charge : un vrai casse-tête.'],
@@ -334,7 +335,7 @@ export function setupLife({ BODIES, toonify }) {
       for (const sc of def.scopes || []) {
         const d = at(sc.at), p = ground(b, d);
         if (!p) continue;
-        const it = add(b, { p, r: 7, kind: 'scope', label: sc.sun ? 'observer le Soleil au cœlostat' : `piloter : ${sc.name}`, name: sc.name, sun: !!sc.sun, eye: p.clone().addScaledVector(d, sc.h), up: d.clone() });
+        const it = add(b, { p: sc.r ? p.clone().addScaledVector(d, 1.62) : p, r: sc.r ? 5 : 7, kind: 'scope', label: sc.sun ? 'observer le Soleil au cœlostat' : `piloter : ${sc.name}`, name: sc.name, sun: !!sc.sun, eye: p.clone().addScaledVector(d, sc.h), up: d.clone() });
         if (sc.laser) {
           // Laser vert (étoile guide) tiré de temps en temps vers le ciel
           const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 1, 6, 1, true), new THREE.MeshBasicMaterial({ color: 0x4dff6a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));

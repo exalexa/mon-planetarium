@@ -137,6 +137,21 @@ const PREFABS = {
     k.box(M(0.8), M(2.4), M(0.8), M(2.4), M(H + 1.6), -M(1), 0x9a6a4a, o);
   } },
   // Maison de pierre bourguignonne (Cluny)
+  // Maison romane de Cluny : arcade de boutique en plein cintre, claire-voie de petites baies à colonnettes à l'étage
+  romane: { hx: 3.5, hz: 4.3, build(k, s) {
+    const W = 6.4, D = 8, H = 6.6, o = { collide: false }, zf = M(D / 2 + 0.03);
+    house(k, { W, D, H, floors: 2, wall: [0xdcc79b, 0xd2bb8c, 0xe3d2aa, 0xcdb589][s % 4], inner: 0xeee2c8, roof: s % 3 ? 0x7d5240 : 0x94634a, roofH: 1.5, seed: s, cols: 1, doorX: -2.1, doorW: 1.2 });
+    k.box(M(2.8), M(2.0), M(0.06), M(0.9), 0, zf, 0x3a2a20, o);
+    { const gg = new THREE.CylinderGeometry(M(1.4), M(1.4), M(0.06), 12, 1, false, Math.PI / 2, Math.PI); gg.rotateX(Math.PI / 2); gg.translate(M(0.9), M(2.0), zf); k.geo(gg, 0x3a2a20); }
+    k.box(M(W + 0.3), M(0.2), M(0.16), 0, M(3.25), zf, 0xbfa878, o);
+    for (let i = 0; i < 6; i++) {
+      const x = -W / 2 + 0.75 + (i * (W - 1.5)) / 5;
+      k.box(M(0.6), M(1.15), M(0.05), M(x), M(3.75), zf, i % 3 === 1 ? 0xffc070 : 0x2c241e, { collide: false, glow: i % 3 === 1 });
+      k.box(M(0.1), M(1.15), M(0.09), M(x + 0.42), M(3.75), zf, 0xefe4c8, o);
+    }
+    k.box(M(W + 0.3), M(0.16), M(0.16), 0, M(4.95), zf, 0xbfa878, o);
+    k.box(M(0.7), M(1.8), M(0.7), M(-2), M(H), M(-1.5), 0xc7b083, o);
+  } },
   pierre: { hx: 4.3, hz: 3.6, build(k, s) {
     house(k, { W: 8, D: 6.5, H: 3.4, floors: 1, wall: 0xd8c49a, inner: 0xeee2c8, roof: ROOF.tile, roofH: 2.6, seed: s, cols: 2 });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(M(0.5), M(3.4), M(0.5), sx * M(3.8), 0, sz * M(3.05), 0xc7b083, { collide: false });
@@ -367,7 +382,7 @@ export const THEMES = {
   // Cluny : ville de pierre autour de l'enceinte, puis vallons de forêts, prés et vignes
   cluny: {
     zone: clunyZone,
-    villages: [['pierre', 22, 12, 'town']], extra: [['chapelle', 3, 'meadow|vine'], ['lampadaire', 40, 'town'], ['feuillu', 700, 'forest'], ['pin', 120, 'forest'], ['feuillu', 60, 'meadow'], ['peuplier', 40, 'river|meadow']],
+    villages: [['romane', 30, 12, 'town']], extra: [['chapelle', 3, 'meadow|vine'], ['lampadaire', 40, 'town'], ['feuillu', 700, 'forest'], ['pin', 120, 'forest'], ['feuillu', 60, 'meadow'], ['peuplier', 40, 'river|meadow']],
     forests: [], fields: [['vigne', 700, 'vine'], ['champ', 10, 'meadow']], lakes: 0,
   },
   lutece: { villages: [['haussmann', 6, 7]], extra: [['lampadaire', 50], ['chapelle', 1]], forests: [['platane', 8, 12]], fields: [], lakes: 0, ocean: 0.06 },
@@ -381,6 +396,7 @@ export const THEMES = {
   },
   glenos: { villages: [['labo', 3, 4], ['pavillon', 3, 7]], extra: [['antenne', 6], ['lampadaire', 18]], forests: [['feuillu', 5, 22]], fields: [['champ', 4]], lakes: 2 },
   enedis: { villages: [['pavillon', 3, 6]], extra: [['eolienne', 22], ['solaire', 30], ['lampadaire', 10]], forests: [['feuillu', 4, 18]], fields: [['champ', 8]], lakes: 2 },
+  station: { villages: [['module', 3, 3]], extra: [['antenne', 5], ['lampadaire', 24], ['cristal', 14]], forests: [], fields: [], lakes: 0 },
   nocturne: { villages: [['mas', 3, 7], ['colombage', 2, 6]], extra: [['kiosque', 6], ['lampadaire', 60]], forests: [['feuillu', 5, 22], ['peuplier', 3, 10]], fields: [['lavande', 4]], lakes: 2 },
   schola: { Rm: 170, villages: [['ecole', 10, 4], ['colombage', 8, 8], ['pierre', 6, 8]], extra: [['chapelle', 6], ['lampadaire', 40]], forests: [['feuillu', 18, 30], ['pin', 10, 24]], fields: [['champ', 30]], ocean: 0.32 },
   persion: { Rm: 220, villages: [['pavillon', 6, 7], ['mas', 4, 7]], extra: [['lampadaire', 30], ['antenne', 3]], forests: [['feuillu', 10, 26], ['pin', 8, 22]], fields: [['champ', 14]] },

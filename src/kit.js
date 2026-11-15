@@ -47,6 +47,7 @@ function prep(geo, color) {
 }
 
 export const kitSolid = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
+kitSolid.userData.tex = 1;
 export const kitGlow = new THREE.MeshBasicMaterial({ vertexColors: true });
 kitGlow.color.setScalar(1.3);
 export const kitGlass = new THREE.MeshStandardMaterial({ color: 0xbfe3ff, transparent: true, opacity: 0.35, roughness: 0.1, metalness: 0.1, depthWrite: false });

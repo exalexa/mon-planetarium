@@ -51,6 +51,7 @@ export const SYSTEM = [
     view: { dist: 0.9 },
     children: [
       { id: 'sylvia', name: 'SYLVIA', section: "Centres d'intérêt", glb: 'Feuilles002', attached: true, view: { radius: 3.2, surface: true } },
+      { id: 'station', name: 'STATION E139', section: 'Station orbitale', landmark: L.orbitalStation, moon: { seed: 71, scale: 0.4, ground: 0x8d95a1, colors: [0x4a5058, 0x6b737e, 0x9aa3ae] }, orbit: { a: 13, e: 0.004, i: 12, node: 2.1, peri: 0.4, M0: 3.1 } },
       { id: 'petra', name: 'PETRA', section: 'Compétences et langues', glb: 'Roche004', glbScale: 4, orbit: { a: 20, e: 0.055, i: 5.1, node: 0.0, peri: 1.0, M0: 0.0 } },
     ],
   },

@@ -241,6 +241,12 @@ export const TEXTS = {
     </ul>
     <button class="log-button" data-gallery="expo" type="button">Voir l'exposition</button>`,
 
+  station: `
+    <p class="log-kicker">PERSION · STATION E139</p>
+    <h2>Station orbitale</h2>
+    <p>Une escale entre deux astres : moyeu à deux niveaux sous une coupole d'observation, quartiers, atelier, laboratoire, baie d'amarrage et serre.</p>
+    <p class="log-muted">En vol libre, posez-vous sur la piste balisée puis entrez à pied : tous les modules se visitent.</p>`,
+
   nocturne: `
     <p class="log-kicker">MUSA · NOCTURNE</p>
     <h2>Musique</h2>

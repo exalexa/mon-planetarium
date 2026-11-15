@@ -779,13 +779,13 @@ function softTexture() {
   x.fillStyle = g; x.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 }
-export function createCME({ sunRadius = 50, width = 0.42, layers = 10 } = {}) {
+export function createCME({ sunRadius = 50, width = 0.42, layers = 5 } = {}) {
   // Éjection de masse coronale : bulle de plasma lumineux qui s'éloigne du soleil.
   // Plusieurs coquilles emboîtées (le front et le panache qui suit), parcourues de filaments
   // brillants qui ondulent comme un fluide (bruit déformé en domaine, crêtes lumineuses).
   const uniforms = { uR: { value: sunRadius }, uFade: { value: 0 }, uTime: { value: 0 }, uScale: { value: 400 }, uSun: { value: sunRadius }, uWidth: { value: width } };
   // Calotte de sphère autour de l'axe +X
-  const geo = new THREE.SphereGeometry(1, 72, 40, 0, Math.PI * 2, 0, width * 1.25);
+  const geo = new THREE.SphereGeometry(1, 40, 20, 0, Math.PI * 2, 0, width * 1.25);
   geo.rotateZ(-Math.PI / 2);
   const group = new THREE.Group();
   for (let i = 0; i < layers; i++) {
@@ -819,14 +819,14 @@ export function createCME({ sunRadius = 50, width = 0.42, layers = 10 } = {}) {
           return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
                      mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
         }
-        float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++) { s += a * noise(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
+        float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a * noise(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
         void main() {
           float ang = acos(clamp(vDir.x, -1.0, 1.0));
           float edge = 1.0 - smoothstep(uWidth * 0.55, uWidth * 1.2, ang);
           // Coordonnées sur la calotte, qui s'écoulent vers l'extérieur avec le temps
           vec3 q = vec3(vDir.yz * 3.4, uLayer * 0.9 + uTime * 0.08);
           vec3 w = vec3(fbm(q + vec3(0.0, 0.0, uTime * 0.15)), fbm(q + vec3(5.2, 1.3, -uTime * 0.12)), 0.0);
-          vec3 w2 = vec3(fbm(q * 1.7 + 3.0 * w + vec3(1.3, 0.0, uTime * 0.1)), fbm(q * 1.7 + 3.0 * w + vec3(0.0, 4.1, 0.0)), 0.0);
+          vec3 w2 = w.yxz * 1.3;
           float n = fbm(q + 3.0 * w2 + vec3(ang * 3.0 - uTime * 0.25, 0.0, 0.0));
           // Crêtes : filaments de plasma fins et brillants, séparés par du vide
           float ridge = 1.0 - abs(2.0 * n - 1.0);
@@ -842,7 +842,7 @@ export function createCME({ sunRadius = 50, width = 0.42, layers = 10 } = {}) {
           a *= smoothstep(15.0, 160.0, vDepth) * smoothstep(uSun * 1.02, uSun * 1.25, vRad);
           vec3 hot = vec3(1.0, 0.74, 0.4), warm = vec3(1.0, 0.38, 0.1), cool = vec3(0.85, 0.16, 0.32);
           vec3 col = mix(mix(cool, warm, smoothstep(0.2, 0.7, ridge)), hot, smoothstep(0.35, 0.9, fil));
-          gl_FragColor = vec4(col * a * uFade * 0.5, 1.0);
+          gl_FragColor = vec4(col * a * uFade * 0.95, 1.0);
         }
       `,
     });
