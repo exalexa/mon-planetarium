@@ -3,7 +3,7 @@
 // et chaque bâtiment est creux, meublé et praticable (volumes de collision par instance).
 import * as THREE from 'three';
 import { Kit, hollow, faceBands, facadeWindows, M, U, rng, kitSolid, kitGlow, kitGlass } from './kit.js';
-import { meudonZone, MEUDON } from './landmarks.js';
+import { meudonZone, MEUDON, clunyZone } from './landmarks.js';
 // Zone demandée (ex. 'high|slope') : vrai si la direction tombe dans l'une d'elles
 const zoneOk = (theme, d, zone) => !zone || !theme.zone || zone.split('|').includes(theme.zone(d));
 
@@ -364,15 +364,20 @@ function prefab(name) {
 // Rm : rayon de l'astre en mètres (échelle du personnage). villages : [modèle, nombre de villages, maisons par village]
 export const THEMES = {
   corneille: { villages: [['colombage', 6, 11]], extra: [['chapelle', 2], ['lampadaire', 30]], forests: [['feuillu', 6, 26], ['peuplier', 3, 14]], fields: [['champ', 10]], lakes: 3 },
-  cluny: { villages: [['pierre', 6, 10]], extra: [['chapelle', 2], ['lampadaire', 16]], forests: [['feuillu', 5, 24]], fields: [['vigne', 90], ['champ', 6]], lakes: 2 },
+  // Cluny : ville de pierre autour de l'enceinte, puis vallons de forêts, prés et vignes
+  cluny: {
+    zone: clunyZone,
+    villages: [['pierre', 22, 12, 'town']], extra: [['chapelle', 3, 'meadow|vine'], ['lampadaire', 40, 'town'], ['feuillu', 700, 'forest'], ['pin', 120, 'forest'], ['feuillu', 60, 'meadow'], ['peuplier', 40, 'river|meadow']],
+    forests: [], fields: [['vigne', 700, 'vine'], ['champ', 10, 'meadow']], lakes: 0,
+  },
   lutece: { villages: [['haussmann', 6, 7]], extra: [['lampadaire', 50], ['chapelle', 1]], forests: [['platane', 8, 12]], fields: [], lakes: 2 },
   cenomane: { villages: [['pavillon', 7, 9]], extra: [['chapelle', 1], ['lampadaire', 20]], forests: [['feuillu', 6, 28], ['pin', 4, 20]], fields: [['champ', 8]], lakes: 3 },
   massalia: { villages: [['mas', 6, 9]], extra: [['calcaire', 70], ['lampadaire', 14]], forests: [['pin', 6, 16], ['olivier', 5, 14], ['palmier', 3, 8]], fields: [['lavande', 10]], lakes: 0 },
   // Meudon : ville et jardins en bas, observatoire, forêt et étang sur le plateau ; pas de maison sur la voie du RER
   meudon: {
     zone: meudonZone, avoid: (d) => Math.abs(d.z - MEUDON.TRACK) < 0.06,
-    villages: [['meuliere', 8, 9, 'low']], extra: [['lampadaire', 28, 'low'], ['antenne', 4, 'high']],
-    forests: [['feuillu', 14, 34, 'high|slope'], ['pin', 6, 16, 'high|slope'], ['feuillu', 3, 10, 'low']], fields: [], lakes: 2, lakeZone: 'high',
+    villages: [['meuliere', 9, 9, 'low']], extra: [['lampadaire', 28, 'low'], ['feuillu', 900, 'high|slope'], ['pin', 260, 'high|slope'], ['feuillu', 30, 'meadow'], ['feuillu', 30, 'low']],
+    forests: [], fields: [], lakes: 0,
   },
   glenos: { villages: [['labo', 3, 4], ['pavillon', 3, 7]], extra: [['antenne', 6], ['lampadaire', 18]], forests: [['feuillu', 5, 22]], fields: [['champ', 4]], lakes: 2 },
   enedis: { villages: [['pavillon', 3, 6]], extra: [['eolienne', 22], ['solaire', 30], ['lampadaire', 10]], forests: [['feuillu', 4, 18]], fields: [['champ', 8]], lakes: 2 },
@@ -586,18 +591,18 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
   for (const [name, n, zone] of theme.extra || []) {
     for (let i = 0, t = 0; i < n && t < n * 8; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, PREFABS[name].tree ? 1 : 1.1, zone)) i++;
   }
-  for (const [name, n] of theme.fields || []) {
+  for (const [name, n, zone] of theme.fields || []) {
     if (name === 'vigne') {
       // Rangs de vigne parallèles, par parcelles
       for (let p = 0; p < n / 10; p++) {
-        const c = goodCenter(); if (!c) continue;
+        const c = goodCenter(zone); if (!c) continue;
         const yaw = rnd() * Math.PI;
         const t1 = new THREE.Vector3().crossVectors(Math.abs(c.y) < 0.9 ? up : new THREE.Vector3(1, 0, 0), c).normalize();
         const t2 = new THREE.Vector3().crossVectors(c, t1);
         const across = t1.clone().multiplyScalar(-Math.sin(yaw)).addScaledVector(t2, Math.cos(yaw));
-        for (let r = 0; r < 10; r++) tryPlace('vigne', c.clone().addScaledVector(across, ((r - 5) * 2.6 * m2u) / R).normalize(), yaw, 0.6);
+        for (let r = 0; r < 10; r++) tryPlace('vigne', c.clone().addScaledVector(across, ((r - 5) * 2.6 * m2u) / R).normalize(), yaw, 0.6, zone);
       }
-    } else for (let i = 0, t = 0; i < n && t < n * 8; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, 1)) i++;
+    } else for (let i = 0, t = 0; i < n && t < n * 8; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, 1, zone)) i++;
   }
   for (const [name, nf, nt, zone] of theme.forests || []) {
     for (let f = 0; f < nf; f++) {
