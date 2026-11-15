@@ -95,3 +95,62 @@ export function roverFromModel(model) {
   g.add(m);
   return g;
 }
+
+// Base de lancement de PROXION (mètres) : plate-forme d'appontage surélevée pour le vaisseau,
+// fusée à l'échelle (≈ 42 m) sur son propre pas de tir, avec sa tour de service.
+export function buildLaunchComplex() {
+  const g = new THREE.Group(), k = new Kit(), o = { collide: false };
+  const CREAM = 0xe9e0cc, ORANGE = 0xe07a3a, MET = 0x8f969c, DARK = 0x3a3f45, WOOD = 0x8a5a36;
+  // --- Plate-forme du vaisseau (Ø 34 m, à 3 m du sol) ---
+  const PH = 3, PR = 17;
+  k.cyl(PR, PR, 0.6, 0, PH - 0.6, 0, 0xb9b3a6, { seg: 28 });
+  k.cyl(PR * 0.55, PR * 0.55, 0.02, 0, PH, 0, ORANGE, { seg: 28, collide: false });
+  k.cyl(PR * 0.5, PR * 0.5, 0.025, 0, PH, 0, 0xb9b3a6, { seg: 28, collide: false });
+  for (let i = 0; i < 4; i++) k.box(1.2, 0.03, PR * 0.8, 0, PH, 0, 0xf2f0ea, { collide: false, rotY: (i * Math.PI) / 4 });
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    k.cyl(0.7, 0.9, PH + 2, Math.cos(a) * PR * 0.8, -2, Math.sin(a) * PR * 0.8, DARK, { seg: 8 });
+    k.box(0.5, 0.25, 0.5, Math.cos(a) * (PR - 0.4), PH, Math.sin(a) * (PR - 0.4), i % 2 ? 0x7dffb0 : 0xffb35c, { collide: false, glow: true });
+  }
+  k.cyl(PR * 0.35, PR * 0.35, PH + 2, 0, -2, 0, DARK, { seg: 16 });
+  // Garde-corps, sauf au droit de l'escalier
+  for (let i = 0; i < 48; i++) {
+    const a = (i / 48) * Math.PI * 2;
+    if (Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < 0.18) continue;
+    k.box(0.12, 1.1, 0.12, Math.cos(a) * (PR - 0.2), PH, Math.sin(a) * (PR - 0.2), MET, o);
+  }
+  k.ring(0, 0, PR - 0.2, PH, PH + 1.1, [[-0.18, 0.18]]);
+  // Escalier d'accès (côté +x), jusqu'au sol et un peu en dessous si le terrain descend
+  const n = 14, rise = (PH + 1.5) / n, run = 0.4;
+  for (let i = 0; i < n; i++) k.box(run + 0.02, PH - (i + 1) * rise + 1.5 + 0.02, 3, PR + i * run + run / 2, -1.5, 0, i % 2 ? MET : 0x9aa1a7);
+  // --- Pas de tir et fusée (à 60 m) ---
+  const RX = -60, RZ = 0;
+  k.box(26, 4, 26, RX, -2, RZ, 0xa59f92);
+  k.box(8, 0.2, 8, RX, 2, RZ, DARK, o);
+  const rk = new THREE.Group(); rk.position.set(RX, 2, RZ); g.add(rk);
+  const kr = new Kit();
+  kr.cyl(1.6, 2.6, 2.2, 0, 0, 0, DARK, { seg: 14, collide: false });       // tuyère
+  kr.cyl(3.2, 3.2, 26, 0, 2.2, 0, CREAM, { seg: 20 });
+  for (const y of [6, 16, 25]) kr.cyl(3.25, 3.25, 1.2, 0, y, 0, ORANGE, { seg: 20, collide: false });
+  kr.cyl(0.1, 3.2, 9, 0, 28.2, 0, CREAM, { seg: 20 });
+  kr.cyl(0.35, 0.35, 0.8, 0, 36.8, 0, ORANGE, { seg: 8, collide: false });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    kr.box(0.35, 6, 3.4, Math.cos(a) * 4.2, 2.2, Math.sin(a) * 4.2, ORANGE, { collide: false, rotY: -a });
+  }
+  for (let i = 0; i < 6; i++) kr.box(0.9, 0.9, 0.08, Math.cos((i / 6) * 6.28) * 0, 10 + i * 2.4, 3.21, i === 2 ? 0x9fd8ff : 0x2a3140, { collide: false, glow: i === 2 });
+  kr.build(rk);
+  // Tour de service : treillis, bras d'accès, ascenseur
+  const TX = RX + 8;
+  for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) k.box(0.5, 40, 0.5, TX + dx, 2, RZ + dz, WOOD);
+  for (let y = 4; y < 42; y += 4) {
+    k.box(4.5, 0.3, 0.3, TX, 2 + y, RZ - 2, WOOD, o); k.box(4.5, 0.3, 0.3, TX, 2 + y, RZ + 2, WOOD, o);
+    k.box(0.3, 0.3, 4.5, TX - 2, 2 + y, RZ, WOOD, o); k.box(0.3, 0.3, 4.5, TX + 2, 2 + y, RZ, WOOD, o);
+  }
+  for (const y of [14, 28]) k.box(4, 0.4, 1.4, TX - 4, 2 + y, RZ, MET, o);
+  k.box(1.6, 3, 1.6, TX, 2, RZ, ORANGE);
+  k.box(0.5, 0.5, 0.5, TX, 42.5, RZ, 0xff5a4a, { collide: false, glow: true });
+  k.build(g);
+  plain(g);
+  return { group: g, padHeight: PH, rocket: new THREE.Vector3(RX, 0, RZ) };
+}

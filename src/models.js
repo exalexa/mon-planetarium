@@ -661,7 +661,10 @@ export function createShip() {
     for (const w of Object.values(variants)) w.holder.visible = w === v;
     // Flammes et feux de position : seulement pour le vaisseau à réacteurs
     for (const f of flames) f.userData.off = !v.engines;
-    navLights.forEach((o) => { o.visible = v.engines; });
+    // Ni halo ni gerbe d'étincelles derrière le vaisseau (point lumineux et particules au milieu de l'écran)
+    halo.userData.off = sparks.userData.off = true;
+    // Feux de bout d'aile seulement (pas de feu sur le dos, au centre de l'image en vue arrière)
+    navLights.forEach((o, i) => { o.visible = v.engines && i < 2; });
     if (!v.engines) return;
     main.userData.off = inner.userData.off = true;
     sides.forEach((f, i) => {
