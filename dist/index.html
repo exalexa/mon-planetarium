@@ -11,8 +11,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=VT323&family=Spectral:ital,wght@0,300;0,400;0,600;1,400&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/mon-planetarium/assets/index-CglVvD0b.js"></script>
-    <link rel="stylesheet" crossorigin href="/mon-planetarium/assets/index-BDQc-Etm.css">
+    <script type="module" crossorigin src="/mon-planetarium/assets/index-B3BREG93.js"></script>
+    <link rel="stylesheet" crossorigin href="/mon-planetarium/assets/index-DkyJng5C.css">
   </head>
   <body>
     <canvas id="bg"></canvas>
@@ -49,6 +49,11 @@
         <feDisplacementMap id="vhs-disp" in="SourceGraphic" in2="nx" scale="2.2" xChannelSelector="R" yChannelSelector="G" />
       </filter>
     </svg>
+    <!-- Pilote automatique, vue extérieure : l'image vient d'une caméra du vaisseau, affichée sur l'écran central
+         du tableau de bord ; la fiche et le journal passent sur deux écrans verts latéraux -->
+    <div id="tpv-wall" aria-hidden="true">
+      <div class="tpv-bezel"><span class="tpv-cam"><i></i>CAM. EXT. 02</span><span class="tpv-tc" id="tpv-tc"></span></div>
+    </div>
     <div id="glass-hud" aria-hidden="true">
       <div class="vhs-band"></div>
       <div class="glass-sheen"></div>

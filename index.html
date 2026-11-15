@@ -47,6 +47,11 @@
         <feDisplacementMap id="vhs-disp" in="SourceGraphic" in2="nx" scale="2.2" xChannelSelector="R" yChannelSelector="G" />
       </filter>
     </svg>
+    <!-- Pilote automatique, vue extérieure : l'image vient d'une caméra du vaisseau, affichée sur l'écran central
+         du tableau de bord ; la fiche et le journal passent sur deux écrans verts latéraux -->
+    <div id="tpv-wall" aria-hidden="true">
+      <div class="tpv-bezel"><span class="tpv-cam"><i></i>CAM. EXT. 02</span><span class="tpv-tc" id="tpv-tc"></span></div>
+    </div>
     <div id="glass-hud" aria-hidden="true">
       <div class="vhs-band"></div>
       <div class="glass-sheen"></div>

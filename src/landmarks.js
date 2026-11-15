@@ -241,11 +241,29 @@ export function lyceeCorneille(R = 4) {
   const court = sphereBand(R, 0, 0.75, 0xd9cfba, 0.004);
   court.userData.noDrape = true;
   g.add(court);
-  const main = wing(structure(g, 0.15, -0.8), { len: 2.4, depth: 0.5, h: 0.82, floors: 3, dormersN: 8, furnish: 'school', seed: 2 });
-  wing(structure(g, 1.15, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4, furnish: 'library', seed: 3 });
-  wing(structure(g, -0.85, 0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4, furnish: 'school', seed: 4 });
+  // Cour d'honneur fermée sur trois côtés par les ailes des XVIIe-XVIIIe siècles, portail baroque au sud
+  const main = wing(structure(g, 0, -0.85), { len: 2.3, depth: 0.5, h: 0.82, floors: 3, dormersN: 8, furnish: 'school', seed: 2 });
+  wing(structure(g, 1.0, -0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4, furnish: 'library', seed: 3 });
+  wing(structure(g, -1.0, -0.05, Math.PI / 2), { len: 1.3, depth: 0.48, h: 0.82, floors: 3, dormersN: 4, furnish: 'school', seed: 4 });
+  // Portail d'entrée (rue du Maulévrier) : piliers à bossages, arc, fronton brisé, grille ouverte, mur de clôture
+  const pt = structure(g, 0, 0.98);
+  const kp = kitOf(pt);
+  for (const sx of [-1, 1]) {
+    kp.box(0.1, 0.42, 0.12, sx * 0.13, 0, 0, C.stoneLight);
+    for (let i = 0; i < 4; i++) kp.box(0.112, 0.03, 0.13, sx * 0.13, 0.05 + i * 0.1, 0, 0xd8ccb2, { collide: false });
+    kp.box(0.55, 0.26, 0.06, sx * 0.47, 0, 0, C.stone);
+    kp.box(0.55, 0.03, 0.08, sx * 0.47, 0.26, 0, C.stoneLight, { collide: false });
+    kp.box(0.008, 0.2, 0.08, sx * 0.08, 0, 0.09, 0x2b2b2b, { collide: false, rotY: sx * 0.7 });
+  }
+  kp.box(0.36, 0.08, 0.13, 0, 0.42, 0, C.stoneLight);
+  for (const sx of [-1, 1]) kp.box(0.12, 0.03, 0.12, sx * 0.12, 0.52, 0, C.stoneLight, { collide: false, rotZ: -sx * 0.45 });
+  kp.box(0.06, 0.08, 0.06, 0, 0.5, 0, C.white, { collide: false });
   // Cheminées
   for (const x of [-0.9, 0, 0.9]) box(main, 0.08, 0.2, 0.08, mat(0xb9ad95), x, 1.0, 0);
+  // Petite cour des cuisines derrière l'aile ouest
+  const cuis = sphereBand(R, 0, 0.12, 0xcfc4ad, 0.0042);
+  cuis.quaternion.setFromUnitVectors(UP, new THREE.Vector3(-1.05, R, -1.05).normalize());
+  cuis.userData.noDrape = true; g.add(cuis);
 
   // Chapelle Saint-Louis (façade au sud, vers +Z) : nef creuse avec bancs et autel
   const ch = structure(g, -1.75, 0.3);
@@ -256,6 +274,17 @@ export function lyceeCorneille(R = 4) {
     const side = new THREE.Group(); side.position.set(sx * 0.285, 0, zz); side.rotation.y = sx * Math.PI / 2; ch.add(side);
     arch(side, 0.1, 0.35, mat(0x2b3240), 0, 0.45, 0);
   }
+  // Plan hybride gothique et classique : contreforts massifs, transept saillant, chœur à abside
+  for (const zz of [-0.37, -0.03, 0.33]) for (const sx of [1, -1]) k.box(0.08, 0.82, 0.1, sx * 0.32, 0, zz, C.stone);
+  for (const sx of [1, -1]) {
+    k.box(0.22, 0.95, 0.34, sx * 0.39, 0, -0.62, C.stone);
+    gableRoof(ch, 0.34, 0.2, 0.22, mat(C.slate), sx * 0.39, 0.95, -0.62).rotation.y = Math.PI / 2;
+    const tw = new THREE.Group(); tw.position.set(sx * 0.505, 0, -0.62); tw.rotation.y = sx * Math.PI / 2; ch.add(tw);
+    arch(tw, 0.1, 0.3, mat(0x2b3240), 0, 0.45, 0);
+  }
+  add(ch, new THREE.CylinderGeometry(0.27, 0.27, 0.9, 16, 1, false, Math.PI / 2, Math.PI), mat(C.stone), 0, 0.45, -0.75);
+  add(ch, new THREE.ConeGeometry(0.29, 0.3, 16, 1, false, Math.PI / 2, Math.PI), mat(C.slate), 0, 1.05, -0.75);
+  k.cyls.push([0, -0.82, 0.2, 0, 0.9]);
   const F = 0.57; // plan de la façade
   // Façade basse percée d'une grande porte en plein cintre
   const DW = 0.14, DH = 0.26;
@@ -292,10 +321,11 @@ export function lyceeCorneille(R = 4) {
 // Transept sud de Cluny III et clocher octogonal de l'Eau-Bénite (deux registres d'arcades, flèche),
 // tour carrée de l'Horloge, absidiole, et bâtiments conventuels du XVIIIe siècle où loge Arts et Métiers.
 // ---------------------------------------------------------------------------
-export function abbayeCluny() {
+export function abbayeCluny(R = 4) {
   const g = new THREE.Group();
   const stone = mat(C.stoneWarm), dark = mat(0x221d18);
-  const t = structure(g, -0.25, -0.35);
+  // Bras sud du grand transept, orienté nord-sud ; le cloître et les bâtiments du XVIIIe s. sont à l'est
+  const t = structure(g, -1.05, -0.35, Math.PI / 2);
   hollow(kitOf(t), { w: 1.9, d: 0.62, h: 1.5, floors: 1, wall: C.stoneWarm, inner: 0xe8dcc0, doors: { '+z': 0.225 }, doorW: 0.1, doorH: 0.2, furnish: 'church', floorCol: 0xb5a180, seed: 6 });
   gableRoof(t, 1.9, 0.48, 0.62, mat(C.tile), 0, 1.5, 0);
   // Contreforts et baies romanes
@@ -324,30 +354,59 @@ export function abbayeCluny() {
   cone(c, 0.37, 0.95, 8, mat(0x6b6a6c), 0, 1.57, 0);
   add(c, new THREE.SphereGeometry(0.03, 6, 5), mat(C.gold), 0, 2.55, 0);
   // Tour de l'Horloge : escalier à vis jusqu'à la salle du mécanisme
-  const h = structure(g, 1.05, 0.15);
+  const h = structure(g, -1.62, -0.15);
   const kh = kitOf(h);
   hollow(kh, { w: 0.42, d: 0.42, h: 1.75, floors: 2, stair: 'spiral', wall: C.stoneWarm, inner: 0xe0d2b4, furnish: 'observatory', seed: 7 });
   for (const y of [0.5, 1.0]) faceBands(kh, 0.42, 0.42, 0, 0, y, 0.03, 0xe2d2b2, { out: 0.01, gap: { x0: -0.06, x1: 0.06, y1: 0.16 } });
   for (const sz of [1, -1]) for (const y of [0.35, 0.7]) box(h, 0.05, 0.16, 0.02, dark, 0, y, sz * 0.215);
   add(h, new THREE.CylinderGeometry(0.1, 0.1, 0.02, 20), glow(0xffe6b0, 1.2), 0, 1.45, 0.22, [Math.PI / 2, 0, 0]);
   cone(h, 0.33, 0.5, 4, mat(C.tile), 0, 1.75, 0, [0, Math.PI / 4, 0]);
-  // Bâtiments conventuels XVIIIe (campus Arts et Métiers), pavillon central en saillie
-  const cv = structure(g, 0.05, 1.0);
-  wing(cv, { len: 2.5, depth: 0.5, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 9, furnish: 'workshop', seed: 8 });
-  porch(cv, { w: 0.5, d: 0.16, h: 0.8, z: 0.33, wall: 0xf2ebdc });
-  pediment(cv, 0.52, 0.16, 0.06, 0xf2ebdc, 0, 0.8, 0.35);
-  // Farinier (XIIIe s.) : long bâtiment bas sous une très haute toiture de tuiles
-  const fa = structure(g, -1.25, -1.15, 0.5);
+  // Bâtiments conventuels XVIIIe (campus Arts et Métiers) : quadrilatère autour du cloître,
+  // façade principale au sud avec pavillon central à fronton
+  const cv = structure(g, 0.55, 0.95);
+  wing(cv, { len: 1.7, depth: 0.45, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 6, furnish: 'workshop', seed: 8 });
+  porch(cv, { w: 0.5, d: 0.16, h: 0.8, z: 0.305, wall: 0xf2ebdc });
+  pediment(cv, 0.52, 0.16, 0.06, 0xf2ebdc, 0, 0.8, 0.33);
+  wing(structure(g, 0.55, -0.6), { len: 1.7, depth: 0.45, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 6, furnish: 'school', seed: 26 });
+  wing(structure(g, 1.4, 0.17, Math.PI / 2), { len: 0.85, depth: 0.45, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 3, furnish: 'library', seed: 27 });
+  wing(structure(g, -0.3, 0.17, -Math.PI / 2), { len: 0.85, depth: 0.45, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 3, furnish: 'school', seed: 28 });
+  // Préau du cloître : pelouse, allées en croix, puits
+  const garth = sphereBand(R, 0, 0.115, 0x86a85e, 0.0042);
+  garth.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0.55, R, 0.17).normalize());
+  garth.userData.noDrape = true; g.add(garth);
+  const cl = structure(g, 0.55, 0.17, 0, false);
+  box(cl, 0.9, 0.006, 0.07, mat(0xd8cdb4), 0, 0.004, 0);
+  box(cl, 0.07, 0.006, 0.8, mat(0xd8cdb4), 0, 0.004, 0);
+  cyl(cl, 0.06, 0.06, 0.06, 12, mat(0xc8b894), 0, 0, 0);
+  cl.userData.colliders = { boxes: [], cyls: [[0, 0, 0.06, -0.02, 0.06]], rings: [] };
+  // Tours Barabans : bases des deux tours de l'ancien narthex
+  for (const [x, z] of [[-1.62, -1.45], [-0.95, -1.62]]) {
+    const b = structure(g, x, z);
+    kitOf(b).box(0.3, 0.55, 0.3, 0, 0, 0, C.stoneWarm);
+    box(b, 0.32, 0.04, 0.32, mat(0xe2d2b2), 0, 0.55, 0);
+    arch(b, 0.08, 0.2, dark, 0, 0.2, 0.152);
+  }
+  // Palais Jean de Bourbon (XVe s., musée) : logis gothique à haute toiture et tourelle d'escalier
+  const pj = structure(g, -0.25, 1.7, 0.15);
+  hollow(kitOf(pj), { w: 0.7, d: 0.4, h: 0.5, floors: 2, wall: 0xd9c49c, inner: 0xeee2c8, doors: { '+z': 0.15 }, furnish: 'library', seed: 29 });
+  gableRoof(pj, 0.7, 0.36, 0.4, mat(C.tile), 0, 0.5, 0);
+  cyl(pj, 0.09, 0.09, 0.7, 10, mat(0xd2bc94), -0.36, 0, 0.2);
+  cone(pj, 0.11, 0.22, 10, mat(C.tile), -0.36, 0.7, 0.2);
+  // Farinier (XIIIe s.) et tour du Moulin : long bâtiment bas sous une très haute toiture de tuiles
+  const tm = structure(g, -1.78, 1.05);
+  kitOf(tm).box(0.26, 0.7, 0.26, 0, 0, 0, C.stoneWarm);
+  cone(tm, 0.22, 0.2, 4, mat(C.tile), 0, 0.7, 0, [0, Math.PI / 4, 0]);
+  const fa = structure(g, -1.05, 1.05);
   hollow(kitOf(fa), { w: 1.1, d: 0.42, h: 0.42, floors: 1, wall: C.stoneWarm, inner: 0xd8c8a6, doors: { '+z': 0.1 }, furnish: 'hall', seed: 9 });
   gableRoof(fa, 1.1, 0.42, 0.42, mat(C.tile), 0, 0.42, 0);
   for (const x of [-0.4, -0.2, 0, 0.2, 0.4]) kitOf(fa).box(0.07, 0.36, 0.06, x, 0, 0.24, C.stoneWarm);
   // Tour des Fromages : tour carrée élancée, escalier à vis
-  const tf = structure(g, 1.55, -0.95);
+  const tf = structure(g, 1.55, -1.25);
   hollow(kitOf(tf), { w: 0.32, d: 0.32, h: 1.25, floors: 2, stair: 'spiral', wall: C.stoneWarm, inner: 0xe0d2b4, furnish: 'none', seed: 10, doorW: 0.09 });
   for (const y of [0.45, 0.85]) box(tf, 0.05, 0.12, 0.02, dark, 0, y, 0.165);
   box(tf, 0.36, 0.05, 0.36, mat(0xe2d2b2), 0, 1.25, 0);
   cone(tf, 0.25, 0.25, 4, mat(C.tile), 0, 1.3, 0, [0, Math.PI / 4, 0]);
-  for (const [x, z, s] of [[-1.55, 0.3, 1.2], [1.7, 0.4, 1.1], [-0.2, -1.45, 1.0], [1.55, 0.9, 1.0]]) treeAt(g, x, z, s, 0x4f7c3f);
+  for (const [x, z, s] of [[0.2, -1.35, 1.2], [1.9, 0.5, 1.1], [0.8, 1.7, 1.0], [1.7, 1.2, 1.0]]) treeAt(g, x, z, s, 0x4f7c3f);
   return g;
 }
 
@@ -356,9 +415,14 @@ export function abbayeCluny() {
 // Façade en pierre de quatre niveaux sous toit de zinc, avant-corps central à grande porte cintrée,
 // halles technologiques en brique polychrome (grande baie centrale, toits en sheds), boulevard arboré.
 // ---------------------------------------------------------------------------
-export function ensamParis() {
+export function ensamParis(R = 4) {
   const g = new THREE.Group();
-  const f = structure(g, 0, 0.7);
+  // Façade sur le boulevard de l'Hôpital, cour intérieure pavée bordée d'ailes, halles au fond
+  const court = sphereBand(R, 0, 0.17, 0xcfc6b4, 0.0042);
+  court.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0, R, 0.38).normalize());
+  court.userData.noDrape = true; g.add(court);
+  for (const sx of [-1, 1]) wing(structure(g, sx * 1.6, 0.05, sx * Math.PI / 2), { len: 1.4, depth: 0.42, h: 0.8, floors: 3, wall: 0xe2d6bd, roof: C.zinc, roofH: 0.24, dormersN: 4, furnish: sx > 0 ? 'lab' : 'office', seed: 30 + sx });
+  const f = structure(g, 0, 0.95);
   wing(f, { len: 2.9, depth: 0.45, h: 0.95, floors: 4, wall: 0xe8ddc5, roof: C.zinc, roofH: 0.28, dormersN: 10, furnish: 'school', seed: 11 });
   // Avant-corps : porche creux, grande porte cintrée
   porch(f, { w: 0.72, d: 0.18, h: 1.12, z: 0.315, wall: 0xf0e7d3, doorW: 0.15, doorH: 0.28 });
@@ -387,7 +451,7 @@ export function ensamParis() {
     arch(hl, 0.1, 0.3, glass, 0.24, 0.06, -0.515);
     if (i === 1) box(hl, 0.3, 0.06, 0.06, mat(0x2b2b2b), 0, 0.6, -0.53);
   });
-  for (let i = 0; i < 7; i++) treeAt(g, -1.5 + i * 0.5, 1.35, 1.05, 0x5b8a45);
+  for (let i = 0; i < 7; i++) treeAt(g, -1.5 + i * 0.5, 1.62, 1.05, 0x5b8a45);
   // Tour Eiffel, au loin sur la lune
   const e = structure(g, -1.7, -1.35, 0.4, false);
   e.scale.setScalar(0.85);
@@ -531,7 +595,33 @@ export function amuMarseille(R) {
 // ---------------------------------------------------------------------------
 export function observatoireMeudon() {
   const g = new THREE.Group();
-  const c = structure(g, 0, 0.2);
+  // Le Château-Neuf repose sur un soubassement ; on y monte par un escalier à double révolution
+  const c0 = structure(g, 0, 0.2);
+  const k0 = kitOf(c0);
+  const POD = 0.12;
+  k0.box(2.86, POD, 1.24, 0, 0, 0, 0xd2c6ad);
+  faceBands(k0, 2.86, 1.24, 0, 0, POD - 0.02, 0.02, 0xefe6d2, { out: 0.01 });
+  const stairs = (x0, z0, dx, dz, n, w) => {
+    // Volée qui descend de POD jusqu'au sol, dans la direction (dx, dz)
+    const run = M(0.3), r = POD / n;
+    for (let i = 0; i < n; i++) {
+      const top = POD - (i + 1) * r, e = i * run + run / 2;
+      if (dx) k0.box(run, top, w, x0 + dx * e, 0, z0, 0xc8bca6);
+      else k0.box(w, top, run, x0, 0, z0 + dz * e, 0xc8bca6);
+    }
+  };
+  // Palier devant la porte du pavillon, deux volées latérales symétriques, balustrade côté jardin
+  k0.box(0.36, POD, 0.2, 0, 0, 0.7, 0xd2c6ad);
+  stairs(-0.18, 0.69, -1, 0, 12, 0.18);
+  stairs(0.18, 0.69, 1, 0, 12, 0.18);
+  k0.box(0.36, 0.06, 0.02, 0, POD, 0.79, 0xefe6d2);
+  for (const sx of [-1, 1]) {
+    const q = new THREE.Group(); q.position.set(sx * 0.27, 0, 0.79); c0.add(q);
+    add(q, new THREE.BoxGeometry(0.2, 0.02, 0.02), mat(0xefe6d2), 0, POD + 0.03 - 0.05, 0).rotation.z = sx * 0.55;
+    // Perrons des ailes
+    stairs(sx * 1.0, 0.31, 0, 1, 12, 0.16);
+  }
+  const c = new THREE.Group(); c.position.y = POD; c0.add(c);
   const k = kitOf(c);
   // Ailes du château, de part et d'autre du pavillon central
   for (const sx of [-1, 1]) {
@@ -622,13 +712,24 @@ export function observatoireMeudon() {
   // Oculaire (côté bas du tube) et point de vue de la caméra, devant l'objectif dans l'axe optique
   add(alt, new THREE.CylinderGeometry(0.015, 0.02, 0.06, 8), mat(0xb08a4a), 0, -0.02, -0.5, [Math.PI / 2, 0, 0]);
   const eye = new THREE.Object3D(); eye.name = 'eyepiece'; eye.position.set(0, 0, 0.53); alt.add(eye);
-  // Terrasse à balustrade (praticable)
-  const t = structure(g, 0, 1.15);
+  // Pavillon : son kit est assemblé ici (il n'est pas enfant direct du monument)
+  c.userData.kit.build(c); delete c.userData.kit;
+  // Grande Terrasse (Le Vau, XVIIe s.) devant le château : esplanade, balustrade, mur de soutènement
+  const t = structure(g, 0, 1.45);
   const kt = kitOf(t);
-  kt.box(2.6, 0.03, 0.5, 0, 0, 0, 0xd8cfbd);
-  for (let i = 0; i < 26; i++) cyl(t, 0.012, 0.012, 0.08, 5, mat(0xefe7d6), -1.25 + i * 0.1, 0.03, 0.23);
-  kt.box(2.6, 0.02, 0.03, 0, 0.11, 0.23, 0xefe7d6);
-  kt.solid(-1.3, 0.03, 0.215, 1.3, 0.13, 0.245);
+  kt.box(3.0, 0.03, 0.6, 0, 0, 0, 0xd8cfbd);
+  for (let i = 0; i < 30; i++) cyl(t, 0.012, 0.012, 0.08, 5, mat(0xefe7d6), -1.45 + i * 0.1, 0.03, 0.28);
+  kt.box(3.0, 0.02, 0.03, 0, 0.11, 0.28, 0xefe7d6);
+  kt.solid(-1.5, 0.03, 0.265, 1.5, 0.13, 0.295);
+  for (const x of [-0.75, 0.75]) { kt.box(0.5, 0.004, 0.3, x, 0.03, -0.05, 0x86a85e, { collide: false }); }
+  // Tour solaire (1960-1970) : fût carré d'environ 35 m surmonté d'une petite coupole
+  const ts = structure(g, 1.85, -0.25);
+  const kts = kitOf(ts);
+  kts.box(0.16, 1.85, 0.16, 0, 0, 0, 0xe8e6e0);
+  for (let i = 0; i < 6; i++) kts.box(0.17, 0.02, 0.17, 0, 0.25 + i * 0.28, 0, 0xc8c6c0, { collide: false });
+  kts.box(0.24, 0.05, 0.24, 0, 1.85, 0, 0xc8c6c0);
+  add(ts, new THREE.SphereGeometry(0.1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf4f4f0), 0, 1.9, 0);
+  kts.box(0.05, 0.1, 0.01, 0, 0, 0.085, 0x3b2b20, { collide: false });
   // Petites coupoles (télescope de 1 m, lunette photographique), creuses
   for (const [x, z] of [[-1.45, -0.7], [1.4, -0.75]]) {
     const s = structure(g, x, z);
@@ -636,7 +737,7 @@ export function observatoireMeudon() {
     cyl(s, 0.2, 0.2, 0.06, 16, mat(0xe6dcc6), 0, 0.32, 0);
     add(s, new THREE.SphereGeometry(0.21, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf4f4f0), 0, 0.38, 0);
   }
-  for (const [x, z, s] of [[-1.75, 0.3, 1.2], [-1.1, -1.3, 1.1], [0.2, -1.4, 1], [1.0, -1.3, 1.15], [1.8, 0.35, 1.2], [-0.6, -1.1, 0.9]]) treeAt(g, x, z, s, 0x3c6634);
+  for (const [x, z, s] of [[-1.75, 0.3, 1.2], [-1.1, -1.3, 1.1], [0.2, -1.4, 1], [1.0, -1.3, 1.15], [-0.6, -1.1, 0.9]]) treeAt(g, x, z, s, 0x3c6634);
   return g;
 }
 

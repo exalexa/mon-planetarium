@@ -1108,6 +1108,17 @@ function updateDashboard(dt) {
   const v = camera.position.distanceTo(lastCam) / Math.max(dt, 1e-3);
   lastCam.copy(camera.position);
   camSpeed += (v - camSpeed) * Math.min(1, dt * 4);
+  if (tpvScreens()) {
+    flickerTimer -= dt;
+    if (flickerTimer <= 0) {
+      flickerTimer = 0.09;
+      flickerGlitch([ui.panelBody, tree.querySelector('.tree-inner')]);
+      const tc = document.getElementById('tpv-tc');
+      const t = performance.now() / 1000;
+      tc.textContent = `${trans ? transferPhase(trans).toUpperCase() : 'EN ORBITE'}  ${String(Math.floor(t / 60) % 60).padStart(2, '0')}:${String(Math.floor(t) % 60).padStart(2, '0')}:${String(Math.floor((t % 1) * 25)).padStart(2, '0')}`;
+    }
+    updateVHS(dt);
+  }
   if (!cockpitLayout() || !current) { hudEl.ret.classList.remove('on'); return; }
   const tgt = bodyCenter(current);
   const dist = camera.position.distanceTo(tgt);
@@ -1198,10 +1209,18 @@ function pushTrail(p, w) {
 }
 
 // Cockpit sur grand écran : la vue se limite à la verrière (64 % supérieurs de l'écran)
+// Pilote automatique en vue extérieure : écran caméra central et écrans verts latéraux
+function tpvScreens() { return window.innerWidth > 760 && mode === 'auto' && views.auto === 'tpv'; }
 function cockpitLayout() { return window.innerWidth > 760 && views[mode] === 'fpv' && !(mode === 'free' && free.walker); }
 function computeViewOffset() {
   const w = window.innerWidth, h = window.innerHeight;
   const mobile = w <= 760;
+  if (tpvScreens()) {
+    // Centre de l'écran caméra (25 vw à gauche, 23 vw à droite, 6 vh en haut, 11 vh en bas)
+    viewOffset.tx = w / 2 - (0.25 * w + 0.77 * w) / 2;
+    viewOffset.ty = h / 2 - (0.06 * h + 0.89 * h) / 2;
+    return;
+  }
   if (cockpitLayout()) {
     glassPx = cockpit.glassBottom(h);
     document.body.style.setProperty('--glass-bottom', `${glassPx}px`);
@@ -1240,8 +1259,10 @@ function syncLayout() {
   btn.textContent = views[mode] === 'fpv' ? 'Vue cockpit' : 'Vue extérieure';
   btn.classList.toggle('fpv', views[mode] === 'fpv');
   document.body.classList.toggle('walking', mode === 'free' && !!free.walker);
-  if (cockpitLayout() && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
-  if (cockpitLayout() && ui.panelBody.textContent && !ui.panelBody.querySelector('.gc')) glitchify(ui.panelBody);
+  document.body.classList.toggle('tpv-screens', tpvScreens());
+  document.body.classList.toggle('free-tpv', mode === 'free' && views.free === 'tpv' && !free.walker);
+  if ((cockpitLayout() || tpvScreens()) && !tree.querySelector('.tree-inner').dataset.glitched) glitchify(tree.querySelector('.tree-inner'), 0.8);
+  if ((cockpitLayout() || tpvScreens()) && ui.panelBody.textContent && !ui.panelBody.querySelector('.gc')) glitchify(ui.panelBody);
   computeViewOffset();
 }
 function toggleView() {
@@ -1255,6 +1276,8 @@ const free = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), offset: new THREE.Vector3(), ang: new THREE.Vector3(),
   anchor: null, target: null, near: null, keys: new Set(), dist: 8, camPos: new THREE.Vector3(), init: false,
   landed: null, walker: null, shipScale: 0.9, touchRot: { x: 0, y: 0 },
+  // Gaz des moteurs (montée en régime progressive) : principal, latéral, vertical, post-combustion
+  thr: new THREE.Vector3(), boostLvl: 0, retro: 0, reverseHold: 0,
 };
 // Commandes : ZQSD (ou WASD, mêmes touches physiques) pour se déplacer, Espace / C pour monter / descendre,
 // flèches pour le tangage et le lacet, Ctrl + flèches gauche/droite pour le roulis, Maj pour accélérer, E pour sortir à pied
@@ -1389,7 +1412,7 @@ function enterFree() {
   trans = null;
   trail.userData.n = 0;
   free.init = true;
-  hint('Vol libre : ZQSD pour se déplacer, flèches pour orienter le vaisseau', 6);
+  hint('Vol libre : ZQSD pour se déplacer, flèches pour orienter le vaisseau · I : informations', 6);
   // L'aide des commandes se replie d'elle-même après quelques secondes
   const help = document.getElementById('free-help');
   help.classList.remove('mini');
@@ -1542,8 +1565,14 @@ function updateFree(dt) {
     const yawIn = ctrl ? 0 : (k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0) + free.touchRot.x;
     const rollIn = ctrl ? (k.has('yr') ? 1 : 0) - (k.has('yl') ? 1 : 0) : 0;
     free.touchRot.x = free.touchRot.y = 0;
-    const tgt = new THREE.Vector3(-pitchIn * 1.2, yawIn * 1.2, rollIn * 1.8);
-    free.ang.lerp(tgt, Math.min(1, dt * 5));
+    // Vitesses angulaires : accélération angulaire limitée, amortissement actif quand on relâche
+    const spd = free.vel.length();
+    const agility = 1 / (1 + spd / 120);
+    const tgt = new THREE.Vector3(-pitchIn * 1.3 * (0.6 + 0.4 * agility), yawIn * 1.2 * (0.6 + 0.4 * agility), rollIn * 1.9);
+    const angRate = tgt.lengthSq() > 0 ? 3.2 : 4.5;
+    free.ang.x += THREE.MathUtils.clamp(tgt.x - free.ang.x, -angRate * dt, angRate * dt);
+    free.ang.y += THREE.MathUtils.clamp(tgt.y - free.ang.y, -angRate * dt, angRate * dt);
+    free.ang.z += THREE.MathUtils.clamp(tgt.z - free.ang.z, -angRate * dt * 1.3, angRate * dt * 1.3);
     ship.quaternion.multiply(qStep.setFromAxisAngle(AX.x, free.ang.x * dt))
       .multiply(qStep.setFromAxisAngle(AX.y, free.ang.y * dt))
       .multiply(qStep.setFromAxisAngle(AX.z, free.ang.z * dt)).normalize();
@@ -1551,14 +1580,30 @@ function updateFree(dt) {
     const F = AX.z.clone().applyQuaternion(ship.quaternion);
     const Lf = AX.x.clone().applyQuaternion(ship.quaternion);
     const U = AX.y.clone().applyQuaternion(ship.quaternion);
-    const input = new THREE.Vector3()
-      .addScaledVector(F, (k.has('fwd') ? 1 : 0) - (k.has('back') ? 1 : 0))
-      .addScaledVector(Lf, (k.has('left') ? 1 : 0) - (k.has('right') ? 1 : 0))
-      .addScaledVector(U, (k.has('up') || (ctrl && k.has('pu')) ? 1 : 0) - (k.has('down') || (ctrl && k.has('pd')) ? 1 : 0));
-    const thrusting = input.lengthSq() > 0;
-    if (thrusting) input.normalize();
-    boost = k.has('boost');
-    free.vel.addScaledVector(input, (boost ? 220 : 26) * dt);
+    const fwdIn = (k.has('fwd') ? 1 : 0) - (k.has('back') ? 1 : 0);
+    const sideIn = (k.has('left') ? 1 : 0) - (k.has('right') ? 1 : 0);
+    const upIn = (k.has('up') || (ctrl && k.has('pu')) ? 1 : 0) - (k.has('down') || (ctrl && k.has('pd')) ? 1 : 0);
+    const vF = free.vel.dot(F);
+    // Reculer : on freine d'abord (rétrofusées), la marche arrière ne s'engage qu'une fois arrêté
+    let mainCmd = fwdIn;
+    free.retro = 0;
+    if (fwdIn < 0) {
+      if (vF > 0.4) { mainCmd = -1; free.retro = 1; free.reverseHold = 0; }
+      else { free.reverseHold += dt; mainCmd = free.reverseHold > 0.5 ? -0.35 : 0; }
+    } else free.reverseHold = 0;
+    // Montée et descente en régime des moteurs (inertie des turbines)
+    const spool = (cur, cmd, up, down) => cur + THREE.MathUtils.clamp(cmd - cur, -down * dt, up * dt);
+    free.thr.x = spool(free.thr.x, mainCmd, 0.9, 1.6);
+    free.thr.y = spool(free.thr.y, sideIn, 2.2, 3);
+    free.thr.z = spool(free.thr.z, upIn, 2.2, 3);
+    boost = k.has('boost') && fwdIn > 0;
+    free.boostLvl = spool(free.boostLvl, boost ? 1 : 0, 0.55, 1.2);
+    const thrusting = Math.abs(free.thr.x) + Math.abs(free.thr.y) + Math.abs(free.thr.z) > 0.03;
+    // Accélérations : moteur principal, rétrofusées plus faibles, propulseurs d'attitude encore plus faibles
+    const aMain = free.thr.x >= 0 ? 24 + free.boostLvl * 190 : (free.retro ? 18 : 9);
+    free.vel.addScaledVector(F, free.thr.x * aMain * dt)
+      .addScaledVector(Lf, free.thr.y * 9 * dt)
+      .addScaledVector(U, free.thr.z * 11 * dt);
     // Gravité de l'astre dominant : g = g0 (R / r)²
     if (free.anchor) {
       const c = bodyCenter(free.anchor);
@@ -1570,9 +1615,16 @@ function updateFree(dt) {
       const r = free.pos.length();
       free.vel.addScaledVector(free.pos.clone().normalize(), -(GM_SUN / (r * r)) * dt);
     }
-    free.vel.multiplyScalar(Math.exp(-dt * (thrusting ? 0.3 : 0.25)));
-    const vmax = boost ? 420 : 40;
-    if (free.vel.length() > vmax) free.vel.setLength(vmax);
+    // Assistance de vol : les dérives latérales s'amortissent doucement (on « tient » le cap),
+    // et sans commande le vaisseau ralentit lentement par rapport à l'astre de référence
+    const vAlong = free.vel.dot(F);
+    const lateral = free.vel.clone().addScaledVector(F, -vAlong);
+    lateral.multiplyScalar(Math.exp(-dt * (Math.abs(free.thr.y) + Math.abs(free.thr.z) > 0.05 ? 0.15 : 0.7)));
+    free.vel.copy(lateral).addScaledVector(F, vAlong * Math.exp(-dt * (thrusting ? 0.04 : 0.12)));
+    // Vitesse limite qui se relâche progressivement (pas de coupure brutale)
+    const vmax = 40 + free.boostLvl * 380;
+    const v = free.vel.length();
+    if (v > vmax) free.vel.setLength(v + (vmax - v) * Math.min(1, dt * 1.5));
     free.pos.addScaledVector(free.vel, dt);
     // Le soleil, les géantes gazeuses et les engins spatiaux restent infranchissables
     if (free.pos.length() < SUN_RADIUS * 1.35) free.pos.setLength(SUN_RADIUS * 1.35);
@@ -1617,7 +1669,7 @@ function updateFree(dt) {
       }
     }
     if (free.anchor) free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
-    thrust = thrusting ? (boost ? 1 : 0.6) : 0.1;
+    thrust = 0.06 + Math.max(0, free.thr.x) * (0.55 + 0.4 * free.boostLvl) + (Math.abs(free.thr.y) + Math.abs(free.thr.z)) * 0.12;
   }
   ship.position.copy(free.pos);
   ship.userData.setThrust(free.landed ? 0 : thrust, simTime);
@@ -1751,7 +1803,7 @@ function freeHud(dt, boost) {
     }
   }
   const status = free.landed ? `posé sur ${free.landed.body.name}` : free.anchor ? `référentiel ${free.anchor.name}` : 'héliocentrique';
-  document.getElementById('free-speed').textContent = `${fmt(free.vel.length() / UA, 2)} UA/s${boost ? ' · propulsion rapide' : ''} · ${status}`;
+  document.getElementById('free-speed').textContent = `${fmt(free.vel.length() / UA, 2)} UA/s${free.boostLvl > 0.05 ? ` · post-combustion ${Math.round(free.boostLvl * 100)} %` : ''}${free.retro ? ' · freinage' : free.reverseHold > 0.5 ? ' · marche arrière' : ''} · ${status}`;
   updateTargetMarker();
   applyProjection(dt, 55);
 }
@@ -1879,7 +1931,7 @@ function updatePanel() {
     if (!html) return;
     ui.panel.scrollTop = 0;
     reveal(html, ui.panelBody);
-    if (cockpitLayout()) glitchify(ui.panelBody);
+    if (cockpitLayout() || tpvScreens()) glitchify(ui.panelBody);
     ui.panel.classList.add('visible');
     computeViewOffset();
   }, 260);
@@ -1969,6 +2021,7 @@ window.addEventListener('keydown', (e) => {
   if (cockpitLayout()) cockpit.press(cockpit.keyFor(e.code));
   if (e.code === 'KeyM') { setMode(mode === 'auto' ? 'free' : 'auto'); return; }
   if (e.code === 'KeyV' && !e.ctrlKey) { toggleView(); return; }
+  if (e.code === 'KeyI') { document.body.classList.toggle('show-info'); return; }
   if (mode === 'free') {
     if (e.code === 'KeyE') { freeAction(); return; }
     if (e.code === 'Escape' && free.walker?.scope) { free.walker.scope = false; return; }

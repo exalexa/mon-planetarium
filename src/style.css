@@ -907,3 +907,93 @@ body.free #hud-nav { display: none; }
 body.walking #free-help { display: none; }
 body.walking #free-speed::after { content: ' · ZQSD marcher · souris regarder · Espace sauter · Maj courir · E agir'; opacity: 0.7; }
 body.walking.in-scope #free-speed, body.walking.in-scope #free-hint { display: none; }
+
+/* ---------- Pilote automatique, vue extérieure : écran caméra + écrans verts ---------- */
+:root { --phos: #8dffa6; --phos-soft: rgba(141, 255, 166, 0.5); }
+#tpv-wall { display: none; position: fixed; inset: 0; z-index: 880; pointer-events: none; }
+.tpv-bezel { position: absolute; left: 25vw; right: 23vw; top: 6vh; bottom: 11vh; }
+@media (min-width: 761px) {
+  body.tpv-screens #tpv-wall {
+    display: block;
+    padding: 6vh 23vw 11vh 25vw;
+    background:
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 7px),
+      linear-gradient(180deg, #2a2119 0%, #1b1510 55%, #120e0a 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  }
+  body.tpv-screens .tpv-bezel {
+    position: fixed; left: calc(25vw - 14px); right: calc(23vw - 14px); top: calc(6vh - 14px); bottom: calc(11vh - 14px);
+    border: 16px solid #2e251d; border-radius: 26px;
+    box-shadow: 0 0 0 2px #5a4632, inset 0 0 0 2px #0c0a08, inset 0 0 60px rgba(0, 0, 0, 0.55), 0 12px 40px rgba(0, 0, 0, 0.6);
+    background:
+      repeating-linear-gradient(180deg, transparent 0 2px, rgba(0, 0, 0, 0.13) 2px 3px),
+      radial-gradient(ellipse at 50% 50%, transparent 60%, rgba(0, 20, 8, 0.45) 100%);
+    z-index: 885;
+  }
+  .tpv-cam, .tpv-tc { position: absolute; top: 10px; font-family: 'VT323', monospace; font-size: 1.3rem; color: var(--phos); text-shadow: 0 0 6px rgba(120, 255, 150, 0.8); letter-spacing: 0.08em; filter: url(#vhs); }
+  .tpv-cam { left: 16px; display: flex; align-items: center; gap: 8px; }
+  .tpv-cam i { width: 9px; height: 9px; border-radius: 50%; background: #ff4a3a; box-shadow: 0 0 8px #ff4a3a; animation: loop-pulse 1.6s ease-in-out infinite; }
+  .tpv-tc { right: 16px; }
+
+  /* Écrans verts : fiche à gauche, journal à droite */
+  body.tpv-screens #astro-info-container,
+  body.tpv-screens #explore-tree .tree-inner {
+    font-family: 'VT323', monospace;
+    color: var(--phos);
+    text-shadow: 0 0 4px rgba(120, 255, 150, 0.85), 0 0 14px rgba(60, 255, 120, 0.3), -1px 0 rgba(255, 80, 80, 0.25), 1px 0 rgba(80, 160, 255, 0.25);
+    background: radial-gradient(ellipse at 50% 40%, #0d2e18 0%, #061a0d 60%, #030d06 100%);
+    border: 12px solid #2e251d;
+    border-radius: 20px;
+    box-shadow: 0 0 0 2px #5a4632, inset 0 0 40px rgba(0, 0, 0, 0.85), inset 0 0 12px rgba(80, 255, 140, 0.15), 0 10px 30px rgba(0, 0, 0, 0.6);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    scrollbar-color: rgba(141, 255, 166, 0.4) transparent;
+  }
+  body.tpv-screens #astro-info-container {
+    left: 1.4vw; top: 8vh; bottom: auto; width: 22vw; max-height: 79vh; padding: 16px 18px;
+    transform: none; opacity: 0;
+  }
+  body.tpv-screens #astro-info-container.visible { opacity: 1; transform: none; }
+  body.tpv-screens #explore-tree { top: 8vh; right: 1.4vw; bottom: auto; width: 20vw; max-height: 79vh; transform: none; }
+  body.tpv-screens #explore-tree .tree-inner { max-height: 79vh; padding: 14px; }
+  body.tpv-screens .panel-body { font-size: 1.2rem; line-height: 1.22; color: var(--phos); }
+  body.tpv-screens .panel-body :is(h2, h3, b, i, p, li, span, .log-kicker, .log-tags) { color: inherit; font-family: inherit; }
+  body.tpv-screens .panel-body h2 { font-size: 1.8rem; text-transform: uppercase; border-bottom: 2px solid var(--phos-soft); }
+  body.tpv-screens .panel-body h3 { font-size: 1.25rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  body.tpv-screens .panel-body h3::after { background: var(--phos-soft); }
+  body.tpv-screens .panel-body li::before { background: var(--phos); box-shadow: 0 0 6px var(--phos); }
+  body.tpv-screens .panel-body a { color: #c8ffd4; border-bottom-color: var(--phos-soft); }
+  body.tpv-screens .panel-body img { filter: grayscale(1) sepia(1) hue-rotate(70deg) saturate(3) brightness(0.8) contrast(1.2); opacity: 0.85; }
+  body.tpv-screens .panel-body button, body.tpv-screens .panel-body .log-button {
+    font-family: 'VT323', monospace; font-size: 1.1rem; color: var(--phos); background: rgba(141, 255, 166, 0.08); border: 1px solid var(--phos-soft); box-shadow: none;
+  }
+  body.tpv-screens .panel-body, body.tpv-screens #explore-tree .tree-inner > * {
+    filter: url(#vhs);
+    -webkit-mask-image: repeating-linear-gradient(180deg, #000 0 2px, rgba(0, 0, 0, 0.6) 2px 3px);
+    mask-image: repeating-linear-gradient(180deg, #000 0 2px, rgba(0, 0, 0, 0.6) 2px 3px);
+  }
+  body.tpv-screens .tree-title, body.tpv-screens .tree-count, body.tpv-screens .tree-count b, body.tpv-screens .tree-reset { font-family: inherit; font-style: normal; color: var(--phos); }
+  body.tpv-screens .tree-title { font-size: 1.35rem; text-transform: uppercase; }
+  body.tpv-screens .tree-progress { background: rgba(141, 255, 166, 0.12); }
+  body.tpv-screens .tree-progress span { background: var(--phos); box-shadow: 0 0 8px var(--phos); }
+  body.tpv-screens .chip { font-family: 'VT323', monospace; background: transparent; border-color: rgba(141, 255, 166, 0.22); padding: 3px 8px; }
+  body.tpv-screens .chip.current { background: rgba(141, 255, 166, 0.13); border-color: var(--phos); }
+  body.tpv-screens .chip-name, body.tpv-screens .chip-sec, body.tpv-screens .chip-state { font-family: inherit; font-weight: 400; font-style: normal; color: var(--phos); }
+  body.tpv-screens .chip-name { font-size: 1.1rem; }
+  body.tpv-screens .chip-sec { font-size: 0.95rem; opacity: 0.7; }
+  body.tpv-screens .chip-led { border-color: var(--phos); }
+  body.tpv-screens .chip.explored .chip-led { background: var(--phos); box-shadow: 0 0 6px var(--phos); }
+  body.tpv-screens .tree-moons li::before, body.tpv-screens .tree-moons li:not(:last-child)::after { border-color: var(--phos-soft); }
+  body.tpv-screens .g-ghost { opacity: 0.45; }
+  body.tpv-screens .g-dim { opacity: 0.55; }
+  body.tpv-screens .g-drop { opacity: 0.15; }
+  body.tpv-screens .g-jit { position: relative; top: -2px; left: 1px; }
+  body.tpv-screens #loop-timer, body.tpv-screens #space-weather { color: var(--phos); font-family: 'VT323', monospace; font-size: 1.1rem; }
+}
+
+/* ---------- Vol libre, vue extérieure : image dégagée (touche I pour afficher les informations) ---------- */
+body.free-tpv:not(.show-info) :is(#astro-info-container, #explore-tree, #free-help, #free-speed, #loop-timer, #space-weather, #near-label, .astro-label) {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
