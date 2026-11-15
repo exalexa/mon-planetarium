@@ -38,11 +38,9 @@ function person(o = {}) {
   // Visage : yeux et sourire
   for (const sx of [-1, 1]) k.box(0.035, 0.05, 0.01, sx * 0.06, 1.55, 0.13, 0x1a1a1a, c);
   k.box(0.1, 0.018, 0.01, 0, 1.47, 0.13, 0x1a1a1a, c);
-  if (o.hair !== false && !o.hat) k.box(0.3, 0.07, 0.28, 0, top - 0.04, -0.01, o.hair ?? 0x3a2a1e, c);
   if (o.hat === 'beret') k.cyl(0.19, 0.16, 0.05, 0.03, top - 0.02, 0, o.hatCol ?? 0x23262c, c);
   if (o.hat === 'cap') { k.cyl(0.16, 0.16, 0.08, 0, top - 0.04, 0, o.hatCol ?? 0x2b4c7a, c); k.box(0.2, 0.02, 0.14, 0, top - 0.04, 0.16, o.hatCol ?? 0x2b4c7a, c); }
   if (o.hat === 'helmet') k.sphere(0.19, 0, 1.6, 0, o.hatCol ?? 0xe8e8ea, { seg: 8 });
-  if (o.hat === 'hood') k.box(0.34, 0.22, 0.3, 0, 1.56, -0.04, coat, c);
   // Bucque et pin's sur la biaude
   if (o.deco) for (let i = 0; i < 5; i++) k.box(0.05, 0.05, 0.01, -0.12 + i * 0.06, 1.12 - (i % 2) * 0.08, front + 0.004, [0xd8a53a, 0xb8423a, 0x3f7fb5, 0xe8e2d0, 0x4c8a4f][i], c);
   if (o.badge) k.box(0.1, 0.07, 0.01, 0.1, 1.1, front + 0.004, o.badge, c);

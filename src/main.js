@@ -10,7 +10,7 @@ import {
 import { createShip, globularCluster } from './models.js';
 import { populate, THEMES } from './cover.js';
 import { stepWalker, walkerView, PERSON } from './walker.js';
-import { buildInterior, buildRover, roverFromModel } from './shipdeck.js';
+import { buildInterior } from './shipdeck.js';
 import { U as KIT_U } from './kit.js';
 import { createCockpit, glitchify, flickerGlitch, glitchTspans, updateVHS } from './cockpit.js';
 import { createLandmarkMoon } from './landmarks.js';
@@ -1362,10 +1362,12 @@ function toggleView() {
 document.getElementById('view-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggleView(); e.currentTarget.blur(); });
 const free = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), offset: new THREE.Vector3(), ang: new THREE.Vector3(),
-  anchor: null, target: null, near: null, keys: new Set(), dist: 8, camPos: new THREE.Vector3(), init: false,
+  anchor: null, target: null, near: null, keys: new Set(), dist: 4.2, camPos: new THREE.Vector3(), init: false,
   landed: null, walker: null, shipScale: 0.9, touchRot: { x: 0, y: 0 },
   // Gaz des moteurs (montée en régime progressive) : principal, latéral, vertical, post-combustion
   thr: new THREE.Vector3(), boostLvl: 0, retro: 0, reverseHold: 0,
+  // Manette des gaz (0 → 1), consigne de vitesse, manche virtuel de la souris
+  throttle: 0, speedSet: 0, stick: { x: 0, y: 0 },
 };
 // Commandes : ZQSD (ou WASD, mêmes touches physiques) pour se déplacer, Espace / C pour monter / descendre,
 // flèches pour le tangage et le lacet, Ctrl + flèches gauche/droite pour le roulis, Maj pour accélérer, E pour sortir à pied
@@ -1500,7 +1502,7 @@ function enterFree() {
   trans = null;
   trail.userData.n = 0;
   free.init = true;
-  hint('Vol libre : ZQSD pour se déplacer, flèches pour orienter le vaisseau · I : informations', 6);
+  hint('Vol libre : Z / S gaz · souris (cliquer pour la capturer) ou flèches pour diriger · Q / D roulis · Maj boost · I : informations', 7);
   // L'aide des commandes se replie d'elle-même après quelques secondes
   const help = document.getElementById('free-help');
   help.classList.remove('mini');
@@ -1556,7 +1558,7 @@ function placeRover(R, W) {
 function unmountDeck() {
   if (!deck) return;
   const W = deck.body.walk;
-  deck.group.removeFromParent(); deck.rover.obj.removeFromParent();
+  deck.group.removeFromParent();
   const i = W.groups.indexOf(deck.grp); if (i >= 0) W.groups.splice(i, 1);
   deck = null;
 }
@@ -1584,10 +1586,7 @@ function mountDeck() {
   obj.add(info.group);
   const grp = { m, inv: m.clone().invert(), s, center: pos.clone(), radius: 16 * W.m2u, col: info.group.userData.colliders };
   W.groups.push(grp);
-  const rover = MODELS.explorer ? roverFromModel(MODELS.explorer) : buildRover(); toonify(rover); rover.name = 'rover';
-  obj.add(rover);
-  deck = { body: b, group: info.group, grp, info, fw, rover: { obj: rover, p: info.bay.clone().applyMatrix4(m), heading: x.clone(), out: false } };
-  placeRover(deck.rover, W);
+  deck = { body: b, group: info.group, grp, info, fw };
   return deck;
 }
 const deckLocal = (w) => (deck && deck.body === w.body ? w.p.clone().applyMatrix4(deck.grp.inv) : null);
@@ -1597,12 +1596,6 @@ function freeAction() {
   if (w) {
     const W = w.body.walk;
     if (w.scope) { w.scope = null; hint('', 0); return; }
-    if (w.veh) { w.veh = false; deck.rover.out = true; w.p.addScaledVector(new THREE.Vector3().crossVectors(w.heading, w.p.clone().sub(W.center).normalize()).normalize(), 1.6 * W.m2u); hint('Amphibie garé · E à côté pour remonter dedans', 4); return; }
-    if (deck && deck.body === w.body && deck.rover.p.distanceTo(w.p) < 3 * W.m2u) {
-      w.veh = true; w.p.copy(deck.rover.p); w.heading.copy(deck.rover.heading); w.v.set(0, 0, 0);
-      hint('Amphibie : Z / S avancer et reculer, Q / D tourner, Maj pour accélérer · il flotte · E pour descendre', 8);
-      return;
-    }
     if (nearScope(w)) { enterScope(w, { big: true, name: 'Grande lunette · Meudon' }); return; }
     const it = life?.nearest(w);
     if (it) {
@@ -1628,7 +1621,7 @@ function freeAction() {
   free.walker = { body: b, p, v: new THREE.Vector3(), heading: dk.fw.clone().negate(), pitch: -0.05, onGround: false, swim: false, scope: false, veh: false };
   user.yaw = user.tYaw = user.pitch = user.tPitch = 0;
   syncLayout();
-  hint('Dans le vaisseau : la rampe est à tribord, l’amphibie dans la soute · E au poste de pilotage pour reprendre les commandes', 9);
+  hint('Dans le vaisseau : la rampe est à tribord · E au poste de pilotage pour reprendre les commandes', 8);
 }
 // Cibles des instruments : l'amas, le Soleil, les planètes et les galaxies du ciel
 const GALAXY_NAMES = ['Galaxie d’Andromède · M31', 'Galaxie du Tourbillon · M51', 'Galaxie du Triangle · M33', 'Galaxie du Sombrero · M104', 'Galaxie de Bode · M81', 'Galaxie du Moulinet · M101', 'Centaurus A · NGC 5128', 'Virgo A · M87', 'Galaxie de l’Aiguille · NGC 4565'];
@@ -1711,78 +1704,81 @@ function updateFree(dt) {
     if (k.has('up') || k.has('fwd') || (k.has('ctrl') && k.has('pu'))) {
       free.landed = null;
       free.vel.copy(up).multiplyScalar(4 * free.shipScale + 2);
+      free.throttle = 0;
       free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
       hint('Décollage', 2);
     }
     camUp = up;
   } else {
-    // Orientation : flèches = tangage et lacet, Ctrl + flèches = roulis (vitesses angulaires amorties)
+    // Pilotage façon chasseur (Star Wars Squadrons) :
+    // - Z / S règlent la manette des gaz (elle reste où on la laisse) ;
+    // - souris (pointeur capturé) ou flèches : tangage et lacet ; Q / D : roulis ;
+    // - Maj : boost ; Espace / C : propulseurs verticaux (décollage, atterrissage) ; Ctrl : dérive (vecteur vitesse libre).
+    // La manœuvrabilité est meilleure à mi-gaz ; la vitesse plafonne bas près des astres.
     const ctrl = k.has('ctrl');
-    // Ctrl + flèches haut / bas : monter / descendre (le tangage est alors suspendu)
-    const pitchIn = (ctrl ? 0 : (k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0)) + free.touchRot.y;
-    const yawIn = ctrl ? 0 : (k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0) + free.touchRot.x;
-    const rollIn = ctrl ? (k.has('yr') ? 1 : 0) - (k.has('yl') ? 1 : 0) : 0;
+    if (k.has('fwd')) free.throttle = Math.min(1, free.throttle + dt * 0.7);
+    if (k.has('back')) free.throttle = Math.max(0, free.throttle - dt * 0.9);
+    const ms = free.stick;
+    const pitchIn = THREE.MathUtils.clamp((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0) + ms.y + free.touchRot.y, -1, 1);
+    const yawIn = THREE.MathUtils.clamp((k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0) + ms.x + free.touchRot.x, -1, 1);
+    const rollIn = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0);
     free.touchRot.x = free.touchRot.y = 0;
-    // Vitesses angulaires : accélération angulaire limitée, amortissement actif quand on relâche
-    const spd = free.vel.length();
-    const agility = 1 / (1 + spd / 120);
-    const tgt = new THREE.Vector3(-pitchIn * 1.3 * (0.6 + 0.4 * agility), yawIn * 1.2 * (0.6 + 0.4 * agility), rollIn * 1.9);
-    const angRate = tgt.lengthSq() > 0 ? 3.2 : 4.5;
+    // Le manche virtuel de la souris revient au neutre
+    ms.x *= Math.exp(-dt * 3.5); ms.y *= Math.exp(-dt * 3.5);
+    boost = k.has('boost');
+    const spool = (cur, cmd, up, down) => cur + THREE.MathUtils.clamp(cmd - cur, -down * dt, up * dt);
+    free.boostLvl = spool(free.boostLvl, boost ? 1 : 0, 1.2, 1.6);
+    // Agilité : optimale vers 50 % des gaz (zone bleue), réduite en boost
+    const agility = (1 - 0.45 * Math.abs(free.throttle - 0.5) * 2) * (1 - 0.35 * free.boostLvl);
+    const tgt = new THREE.Vector3(-pitchIn * 1.7 * agility, yawIn * 1.05 * agility, -rollIn * 2.6);
+    const angRate = 7;
     free.ang.x += THREE.MathUtils.clamp(tgt.x - free.ang.x, -angRate * dt, angRate * dt);
     free.ang.y += THREE.MathUtils.clamp(tgt.y - free.ang.y, -angRate * dt, angRate * dt);
     free.ang.z += THREE.MathUtils.clamp(tgt.z - free.ang.z, -angRate * dt * 1.3, angRate * dt * 1.3);
     ship.quaternion.multiply(qStep.setFromAxisAngle(AX.x, free.ang.x * dt))
       .multiply(qStep.setFromAxisAngle(AX.y, free.ang.y * dt))
       .multiply(qStep.setFromAxisAngle(AX.z, free.ang.z * dt)).normalize();
-    // Translation dans le repère du vaisseau (avant +Z, gauche +X, haut +Y)
     const F = AX.z.clone().applyQuaternion(ship.quaternion);
-    const Lf = AX.x.clone().applyQuaternion(ship.quaternion);
     const U = AX.y.clone().applyQuaternion(ship.quaternion);
-    const fwdIn = (k.has('fwd') ? 1 : 0) - (k.has('back') ? 1 : 0);
-    const sideIn = (k.has('left') ? 1 : 0) - (k.has('right') ? 1 : 0);
-    const upIn = (k.has('up') || (ctrl && k.has('pu')) ? 1 : 0) - (k.has('down') || (ctrl && k.has('pd')) ? 1 : 0);
+    const upIn = (k.has('up') ? 1 : 0) - (k.has('down') ? 1 : 0);
+    // Vitesse maximale selon l'altitude : lente au ras des astres (précision), rapide dans le vide
+    let vCruise = 70;
+    if (free.anchor) {
+      const R = bodyRadius(free.anchor);
+      const h = Math.max(0, free.pos.distanceTo(bodyCenter(free.anchor)) - R);
+      const vLow = THREE.MathUtils.clamp(R * 0.35, 0.6, 6) + 0.4;
+      vCruise = THREE.MathUtils.lerp(vLow, 70, THREE.MathUtils.smoothstep(h, R * 0.3, R * 8));
+    }
+    const vBoost = vCruise * (1 + free.boostLvl * (vCruise > 30 ? 5 : 0.8));
+    free.speedSet = vBoost * (free.throttle * (1 - free.boostLvl) + free.boostLvl);
+    // La vitesse rejoint la consigne avec une accélération finie (moteur), un freinage plus vif
     const vF = free.vel.dot(F);
-    // Reculer : on freine d'abord (rétrofusées), la marche arrière ne s'engage qu'une fois arrêté
-    let mainCmd = fwdIn;
-    free.retro = 0;
-    if (fwdIn < 0) {
-      if (vF > 0.4) { mainCmd = -1; free.retro = 1; free.reverseHold = 0; }
-      else { free.reverseHold += dt; mainCmd = free.reverseHold > 0.5 ? -0.35 : 0; }
-    } else free.reverseHold = 0;
-    // Montée et descente en régime des moteurs (inertie des turbines)
-    const spool = (cur, cmd, up, down) => cur + THREE.MathUtils.clamp(cmd - cur, -down * dt, up * dt);
-    free.thr.x = spool(free.thr.x, mainCmd, 0.9, 1.6);
-    free.thr.y = spool(free.thr.y, sideIn, 2.2, 3);
-    free.thr.z = spool(free.thr.z, upIn, 2.2, 3);
-    boost = k.has('boost') && fwdIn > 0;
-    free.boostLvl = spool(free.boostLvl, boost ? 1 : 0, 0.55, 1.2);
-    const thrusting = Math.abs(free.thr.x) + Math.abs(free.thr.y) + Math.abs(free.thr.z) > 0.03;
-    // Accélérations : moteur principal, rétrofusées plus faibles, propulseurs d'attitude encore plus faibles
-    const aMain = free.thr.x >= 0 ? 24 + free.boostLvl * 190 : (free.retro ? 18 : 9);
-    free.vel.addScaledVector(F, free.thr.x * aMain * dt)
-      .addScaledVector(Lf, free.thr.y * 9 * dt)
-      .addScaledVector(U, free.thr.z * 11 * dt);
+    const acc = (free.speedSet > vF ? 0.6 : 1.1) * Math.max(vBoost, 2);
+    const vNew = vF + THREE.MathUtils.clamp(free.speedSet - vF, -acc * dt, acc * dt);
+    // Le vecteur vitesse s'aligne sur le nez (adhérence), sauf en dérive (Ctrl)
+    const grip = ctrl ? 0.25 : 3.2;
+    const want = F.clone().multiplyScalar(vNew).addScaledVector(U, upIn * Math.max(1.2, vCruise * 0.35));
+    free.vel.lerp(want, 1 - Math.exp(-dt * grip));
+    if (!ctrl) free.vel.addScaledVector(F, vNew - free.vel.dot(F));
+    free.thr.x = free.speedSet / Math.max(vBoost, 1e-3);
+    free.thr.z = upIn;
+    free.retro = vF > free.speedSet + 0.5 ? 1 : 0;
+    const thrusting = free.throttle > 0.02 || upIn !== 0;
     // Gravité de l'astre dominant : g = g0 (R / r)²
     if (free.anchor) {
       const c = bodyCenter(free.anchor);
       const n = free.pos.clone().sub(c);
       const r = n.length();
       const R = bodyRadius(free.anchor);
-      free.vel.addScaledVector(n.normalize(), -surfaceGravity(free.anchor) * (R / r) * (R / r) * dt);
+      // Les répulseurs compensent la pesanteur dès que les moteurs tournent : elle ne se fait sentir
+      // que gaz coupés, sans propulseur vertical (descente douce pour se poser)
+      const gk = (1 - Math.min(1, free.throttle * 5)) * ((free.keys.has('up') ? 0 : 1)) * 0.35;
+      free.vel.addScaledVector(n.normalize(), -surfaceGravity(free.anchor) * (R / r) * (R / r) * dt * gk);
     } else {
       const r = free.pos.length();
       free.vel.addScaledVector(free.pos.clone().normalize(), -(GM_SUN / (r * r)) * dt);
     }
-    // Assistance de vol : les dérives latérales s'amortissent doucement (on « tient » le cap),
-    // et sans commande le vaisseau ralentit lentement par rapport à l'astre de référence
-    const vAlong = free.vel.dot(F);
-    const lateral = free.vel.clone().addScaledVector(F, -vAlong);
-    lateral.multiplyScalar(Math.exp(-dt * (Math.abs(free.thr.y) + Math.abs(free.thr.z) > 0.05 ? 0.15 : 0.7)));
-    free.vel.copy(lateral).addScaledVector(F, vAlong * Math.exp(-dt * (thrusting ? 0.04 : 0.12)));
-    // Vitesse limite qui se relâche progressivement (pas de coupure brutale)
-    const vmax = 40 + free.boostLvl * 380;
-    const v = free.vel.length();
-    if (v > vmax) free.vel.setLength(v + (vmax - v) * Math.min(1, dt * 1.5));
+    void thrusting;
     free.pos.addScaledVector(free.vel, dt);
     // Le soleil, les géantes gazeuses et les engins spatiaux restent infranchissables
     if (free.pos.length() < SUN_RADIUS * 1.35) free.pos.setLength(SUN_RADIUS * 1.35);
@@ -1827,7 +1823,7 @@ function updateFree(dt) {
       }
     }
     if (free.anchor) free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
-    thrust = 0.06 + Math.max(0, free.thr.x) * (0.55 + 0.4 * free.boostLvl) + (Math.abs(free.thr.y) + Math.abs(free.thr.z)) * 0.12;
+    thrust = 0.06 + Math.max(0, free.thr.x) * (0.55 + 0.4 * free.boostLvl) + Math.abs(free.thr.z) * 0.12;
   }
   ship.position.copy(free.pos);
   ship.userData.setThrust(free.landed ? 0 : thrust, simTime);
@@ -1853,21 +1849,22 @@ function updateFree(dt) {
     document.getElementById('eyepiece').classList.remove('on');
     document.body.classList.remove('in-scope');
   } else {
-    const camWant = free.pos.clone().add(new THREE.Vector3(0, dist * 0.62, -dist * 0.82).applyQuaternion(qLook));
-    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, dist * 0.05, dist * 0.45).applyQuaternion(qLook)), camUp);
+    // Caméra dans l'axe, juste derrière le vaisseau, qui suit aussi son roulis
+    const camWant = free.pos.clone().add(new THREE.Vector3(0, 0, -dist).applyQuaternion(qLook));
+    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, 0, dist * 2).applyQuaternion(qLook)), camUp, free.landed ? 8 : 14);
   }
   freeHud(dt, boost);
 }
 
 // Caméra de poursuite, compensée du mouvement de l'astre de référence pour éviter les tremblements
-function followCamera(dt, want, target, up) {
+function followCamera(dt, want, target, up, stiff = 8) {
   const ref = free.landed ? free.landed.body : free.anchor;
   if (ref && free.lastRef === ref) free.camPos.add(bodyCenter(ref).sub(free.lastRefPos));
   free.lastRef = ref;
   free.lastRefPos = ref ? bodyCenter(ref) : null;
-  free.camPos.lerp(want, 1 - Math.exp(-dt * 8));
+  free.camPos.lerp(want, 1 - Math.exp(-dt * stiff));
   camera.position.copy(free.camPos);
-  camera.up.lerp(up, Math.min(1, dt * 4)).normalize();
+  camera.up.lerp(up, Math.min(1, dt * stiff * 0.7)).normalize();
   camera.lookAt(target);
   sky.visible = true;
   document.getElementById('eyepiece').classList.remove('on');
@@ -1893,7 +1890,6 @@ function updateWalker(dt) {
   // La cabine ne se montre que de l'intérieur : dehors, on voit la coque du vaisseau
   if (deck) for (const o of deck.info.cabin) o.visible = inCabin;
   // L'amphibie n'apparaît dehors qu'une fois descendu par la rampe
-  if (deck) deck.rover.obj.visible = inCabin || deck.rover.out;
   ship.userData.setThrust(0, simTime);
   autoThrust = 0;
   pushTrail(ship.position, 0);
@@ -1952,21 +1948,9 @@ function updateWalker(dt) {
     pitch: ((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0)) * 1.4 * dt + lookIn.pitch,
   };
   lookIn.yaw = lookIn.pitch = 0;
-  if (w.veh) { input.yaw -= input.strafe * 1.5 * dt * (input.fwd < 0 ? -1 : 1); input.strafe = 0; }
   stepWalker(w, W, input, Math.min(dt, 0.05));
   walkerView(w, W, wEye, wLook, wUp);
-  if (w.veh && deck) {
-    // L'amphibie suit le conducteur ; caméra de poursuite au-dessus et en arrière
-    const R = deck.rover, upv = w.p.clone().sub(W.center).normalize();
-    R.p.copy(w.p); R.heading.copy(w.heading); R.out = true;
-    placeRover(R, W);
-    if (w.swim) R.obj.position.addScaledVector(upv, (0.25 + 0.06 * Math.sin(simTime * 2.2)) * W.m2u);
-    const inDeck = deck.info.inside(w.p.clone().applyMatrix4(deck.grp.inv));
-    if (inDeck) wEye.copy(w.p).addScaledVector(upv, 1.7 * W.m2u).addScaledVector(w.heading, -0.4 * W.m2u);
-    else wEye.copy(w.p).addScaledVector(upv, (3.2 - w.pitch * 3) * W.m2u).addScaledVector(w.heading, -7 * W.m2u);
-    wLook.copy(w.p).addScaledVector(upv, 1.3 * W.m2u).addScaledVector(w.heading, 3 * W.m2u);
-    wUp.copy(upv);
-  }
+
   obj.localToWorld(wEye); obj.localToWorld(wLook);
   wUp.transformDirection(obj.matrixWorld);
   camera.position.copy(wEye);
@@ -1988,8 +1972,6 @@ function updateWalker(dt) {
     const it = w.veh ? null : life?.nearest(w);
     if (nearScope(w)) hint('E : regarder dans la grande lunette', 0.3);
     else if (it) hint(`E : ${it.label}`, 0.3);
-    else if (w.veh) hint(w.swim ? 'L’amphibie flotte · E : descendre' : 'E : descendre de l’amphibie', 0.3);
-    else if (deck && deck.body === b && deck.rover.p.distanceTo(w.p) < 3 * W.m2u) hint('E : monter dans l’amphibie', 0.3);
     else if (dl0 && deck.info.inside(dl0) && dl0.distanceTo(deck.info.seat) < 1.5 * KIT_U) hint('E : reprendre les commandes', 0.3);
     else if (w.swim) hint('À la nage', 0.3);
   }
@@ -2013,7 +1995,7 @@ function freeHud(dt, boost) {
     }
   }
   const status = free.landed ? `posé sur ${free.landed.body.name}` : free.anchor ? `référentiel ${free.anchor.name}` : 'héliocentrique';
-  document.getElementById('free-speed').textContent = `${fmt(free.vel.length() / UA, 2)} UA/s${free.boostLvl > 0.05 ? ` · post-combustion ${Math.round(free.boostLvl * 100)} %` : ''}${free.retro ? ' · freinage' : free.reverseHold > 0.5 ? ' · marche arrière' : ''} · ${status}`;
+  document.getElementById('free-speed').textContent = `gaz ${Math.round(free.throttle * 100)} %${Math.abs(free.throttle - 0.5) < 0.17 ? ' (manœuvre optimale)' : ''} · ${fmt(free.vel.length() / UA, 2)} UA/s${free.boostLvl > 0.05 ? ` · boost ${Math.round(free.boostLvl * 100)} %` : ''}${free.keys.has('ctrl') ? ' · dérive' : ''} · ${status}`;
   updateTargetMarker();
   applyProjection(dt, 55);
 }
@@ -2267,6 +2249,9 @@ canvas.addEventListener('pointerdown', (e) => {
     if (k) { cockpit.press(k); if (k.action) cockpitAction(k.action); pointer.skip = true; return; }
   }
   // À pied, un clic capture la souris pour regarder librement (Échap pour la libérer)
+  if (mode === 'free' && !free.walker && e.pointerType === 'mouse' && document.pointerLockElement !== canvas && !cockpitLayout()) {
+    canvas.requestPointerLock?.();
+  }
   if (mode === 'free' && free.walker && e.pointerType === 'mouse' && document.pointerLockElement !== canvas) {
     canvas.requestPointerLock?.();
   }
@@ -2298,6 +2283,12 @@ canvas.addEventListener('pointermove', (e) => {
   canvas.style.cursor = 'grabbing';
 });
 document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement === canvas && mode === 'free' && !free.walker) {
+    // Manche virtuel : la souris incline le vaisseau, et revient au neutre quand on la laisse
+    free.stick.x = THREE.MathUtils.clamp(free.stick.x - e.movementX * 0.012, -1, 1);
+    free.stick.y = THREE.MathUtils.clamp(free.stick.y - e.movementY * 0.012, -1, 1);
+    return;
+  }
   if (document.pointerLockElement !== canvas || !free.walker) return;
   lookIn.yaw -= e.movementX * 0.0022;
   lookIn.pitch -= e.movementY * 0.0022;
@@ -2468,14 +2459,13 @@ function loadModel(name) {
     else gltfLoader.load(import.meta.env.BASE_URL + 'models/' + name + '.glb', ok, undefined, ko);
   });
 }
-const assetsP = Promise.all(['vaisseau', 'explorer', 'pnj'].map(loadModel)).then(([vaisseau, explorer, pnj]) => {
-  Object.assign(MODELS, { vaisseau, explorer, pnj });
+const assetsP = Promise.all(['vaisseau', 'pnj'].map(loadModel)).then(([vaisseau, pnj]) => {
+  Object.assign(MODELS, { vaisseau, pnj });
   if (vaisseau) {
     toonify(vaisseau);
     ship.userData.setHull(vaisseau);
     shipLen1 = 0;
   }
-  if (explorer) toonify(explorer);
   return MODELS;
 });
 if (window.__PLANETARIUM_GLB__) {
