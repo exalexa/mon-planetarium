@@ -1,3 +1,4 @@
+import { setupLife } from './life.js';
 import './style.css';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -43,7 +44,8 @@ camera.position.set(0, 900, 1600);
 const sky = createSky();
 const stars = createStarfield();
 stars.material.uniforms.uPixelRatio.value = pixelRatio;
-stars.add(createGalaxies());
+const galaxies = createGalaxies();
+stars.add(galaxies);
 scene.add(sky, stars);
 
 // Lumière : le soleil éclaire, la nuit reste bleutée
@@ -465,6 +467,7 @@ function buildSystem(gltf) {
   }
   byId.lexa.viewRadius = SUN_RADIUS;
   setupWalking();
+  life = setupLife({ BODIES, toonify });
   // Éléments animés des monuments (train du RER à Meudon…)
   for (const b of BODIES) b.obj?.traverse((o) => { if (o.userData.tick) ticks.push(o.userData.tick); });
   ready = true;
@@ -512,6 +515,7 @@ function colliderGroups(obj) {
   return { groups: out, scope };
 }
 const ticks = [];
+let life = null;
 function setupWalking() {
   const t0 = performance.now();
   for (const b of BODIES) {
@@ -676,10 +680,16 @@ function updateTelescope(dt) {
   tele.cp.getWorldQuaternion(qInv).invert();
   // Direction de l'amas dans le repère local de la coupole : la monture compense
   // à chaque instant la rotation de la lune et le mouvement d'ASTRA
-  const d = OMEGA_DIR.clone().applyQuaternion(qInv);
+  const sc = mode === 'free' && free.walker?.scope;
+  const want = (sc && sc.big && sc.dir ? sc.dir : OMEGA_DIR).clone().applyQuaternion(qInv);
+  // La monture rallie sa cible en douceur
+  if (!tele.d) tele.d = want.clone();
+  tele.d.lerp(want, Math.min(1, dt * 2.5)).normalize();
+  const d = tele.d;
   tele.rot.rotation.y = Math.atan2(d.x, d.z);
   tele.alt.rotation.x = -Math.max(0.05, Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)));
-  const target = current?.id === 'omega' || insideDome() ? 1 : 0;
+  // La trappe reste ouverte : la lunette se voit de l'extérieur, pointée sur l'amas
+  const target = 1;
   tele.open += (target - tele.open) * Math.min(1, dt * 1.2);
   tele.a.rotation.y = -tele.open * (tele.gap / 2 + 0.03);
   tele.b.rotation.y = tele.open * (tele.gap / 2 + 0.03);
@@ -920,8 +930,18 @@ function transferPos(tr, t, f) {
   };
   const tgtC = current.isLandmark ? f.look.clone() : bodyCenter(current);
   const endOff = f.pos.clone().sub(tgtC);
+  // Arrivée : la spirale d'approche part du côté d'où vient le vaisseau, pour ne jamais
+  // dépasser la cible puis revenir en arrière. L'angle est figé au premier calcul.
+  if (tr.thArr === undefined) {
+    const src = (tr.dep ? depC : tr.from).clone().sub(tgtC);
+    let da = Math.atan2(src.z, src.x) - Math.atan2(endOff.z, endOff.x);
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    // Rotation autour de Y : angle positif = sens inverse de atan2(z, x)
+    tr.thArr = -THREE.MathUtils.clamp(da, -2.5, 2.5);
+  }
   const cPoint = (u) => {
-    const off = endOff.clone().applyAxisAngle(UP, -tr.thC * (1 - u));
+    const off = endOff.clone().applyAxisAngle(UP, tr.thArr * (1 - u));
     off.multiplyScalar(1 + 1.8 * (1 - u) * (1 - u));
     return tgtC.clone().add(off);
   };
@@ -1462,8 +1482,14 @@ function freeAction() {
   const w = free.walker;
   if (w) {
     const W = w.body.walk;
-    if (w.scope) { w.scope = false; hint('', 0); return; }
-    if (nearScope(w)) { w.scope = true; hint('Grande lunette de Meudon : ω Centauri · E pour se relever', 6); return; }
+    if (w.scope) { w.scope = null; hint('', 0); return; }
+    if (nearScope(w)) { enterScope(w, { big: true, name: 'Grande lunette · Meudon' }); return; }
+    const it = life?.nearest(w);
+    if (it) {
+      if (it.kind === 'scope') enterScope(w, it);
+      else life.use(it);
+      return;
+    }
     const shipLocal = w.body.obj.worldToLocal(ship.position.clone());
     if (shipLocal.distanceTo(w.p) < 12 * W.m2u) {
       leaveWalker();
@@ -1490,6 +1516,21 @@ function freeAction() {
   user.yaw = user.tYaw = user.pitch = user.tPitch = 0;
   syncLayout();
   hint('À pied : ZQSD pour marcher, souris ou flèches pour regarder, Espace pour sauter, Maj pour courir · E près du vaisseau pour remonter', 9);
+}
+// Cibles des instruments : l'amas, le Soleil, les planètes et les galaxies du ciel
+const GALAXY_NAMES = ['Galaxie d’Andromède · M31', 'Galaxie du Tourbillon · M51', 'Galaxie du Triangle · M33', 'Galaxie du Sombrero · M104', 'Galaxie de Bode · M81', 'Galaxie du Moulinet · M101', 'Centaurus A · NGC 5128', 'Virgo A · M87', 'Galaxie de l’Aiguille · NGC 4565'];
+let scopeList = null;
+function scopeTargets() {
+  if (scopeList) return scopeList;
+  scopeList = [{ name: 'ω Centauri', info: 'amas globulaire · α 13h 26m 47s · δ −47° 28′ 46″', dir: () => OMEGA_DIR.clone(), fov: 3.2 }];
+  for (const b of BODIES) if (b.obj && (b.kind === 'planet' || b.kind === 'star')) scopeList.push({ name: b.name, info: b.kind === 'star' ? 'étoile · filtre Hα 656,3 nm' : b.section, body: b });
+  galaxies.children.forEach((g, i) => scopeList.push({ name: GALAXY_NAMES[i % GALAXY_NAMES.length], info: 'galaxie', mesh: g, fov: THREE.MathUtils.clamp((g.geometry.parameters.width / 8000) * 90, 3, 16) }));
+  return scopeList;
+}
+function enterScope(w, it) {
+  const list = scopeTargets();
+  w.scope = { big: !!it.big, name: it.name, eyeL: it.eye || null, upL: it.up || null, i: it.sun ? list.findIndex((t) => t.body?.kind === 'star') : 0, sun: !!it.sun, off: { yaw: 0, pitch: 0 }, zoom: 1, held: true, dir: null };
+  hint('Q / D : changer de cible · Z / S : zoom · souris : pointage fin · E : quitter', 7);
 }
 function leaveWalker() {
   if (!free.walker) return;
@@ -1735,23 +1776,51 @@ function updateWalker(dt) {
   ship.userData.setThrust(0, simTime);
   autoThrust = 0;
   pushTrail(ship.position, 0);
-  if (w.scope && tele) {
-    // Dans la grande lunette : la caméra est à l'objectif et vise l'amas
-    const pos = tele.eye.getWorldPosition(new THREE.Vector3());
+  if (w.scope) {
+    // À l'oculaire d'un instrument : la caméra est à l'objectif et vise la cible choisie
+    const sc = w.scope, list = scopeTargets();
+    const step = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0);
+    if (step && !sc.held && !sc.sun) { sc.i = (sc.i + step + list.length) % list.length; sc.off.yaw = sc.off.pitch = 0; sc.zoom = 1; }
+    sc.held = step !== 0;
+    sc.zoom = THREE.MathUtils.clamp(sc.zoom * Math.exp(((k.has('back') ? 1 : 0) - (k.has('fwd') ? 1 : 0)) * dt * 1.2), 0.25, 3);
+    const tg = list[sc.i];
+    const pos = sc.big && tele ? tele.eye.getWorldPosition(new THREE.Vector3()) : obj.localToWorld(sc.eyeL.clone());
+    const upW = sc.big ? W.center.clone().applyMatrix4(obj.matrixWorld).sub(pos).negate().normalize() : sc.upL.clone().transformDirection(obj.matrixWorld);
+    let dir, fov = tg.fov || 3.2;
+    if (tg.body) {
+      const c = bodyCenter(tg.body);
+      dir = c.clone().sub(pos); const dist = dir.length(); dir.normalize();
+      fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan((bodyRadius(tg.body) * (tg.body.kind === 'star' ? 1.5 : 2.4)) / dist)), 0.15, 25);
+    } else if (tg.mesh) dir = tg.mesh.getWorldPosition(new THREE.Vector3()).sub(pos).normalize();
+    else dir = tg.dir();
+    fov *= sc.zoom;
+    // Pointage fin à la souris ou aux flèches
+    const f = THREE.MathUtils.degToRad(fov);
+    sc.off.yaw = THREE.MathUtils.clamp(sc.off.yaw + lookIn.yaw * 0.6 + ((k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0)) * dt * 0.5, -1.5, 1.5);
+    sc.off.pitch = THREE.MathUtils.clamp(sc.off.pitch + lookIn.pitch * 0.6 + ((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0)) * dt * 0.5, -1.5, 1.5);
+    lookIn.yaw = lookIn.pitch = 0;
+    const right = new THREE.Vector3().crossVectors(dir, upW).normalize();
+    dir = dir.clone().applyAxisAngle(upW, sc.off.yaw * f).applyAxisAngle(right, sc.off.pitch * f).normalize();
+    sc.dir = dir;
     camera.position.copy(pos);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(pos.clone().addScaledVector(OMEGA_DIR, 100));
+    camera.up.copy(upW);
+    camera.lookAt(pos.clone().addScaledVector(dir, 100));
     camera.near = 0.05; camera.updateProjectionMatrix();
     sky.visible = false;
     const ep = document.getElementById('eyepiece');
     ep.classList.add('on');
+    ep.classList.toggle('sun', tg.body?.kind === 'star');
     document.body.classList.add('in-scope');
+    const below = dir.dot(upW) < -0.02;
+    const sp = ep.querySelectorAll('.eyepiece-info span');
+    sp[0].textContent = sc.name;
+    sp[1].textContent = `${tg.name} · ${tg.info}`;
+    sp[2].textContent = below ? 'Cible sous l’horizon' : sc.sun ? 'Cœlostat asservi au Soleil' : `Suivi actif · cible ${sc.i + 1}/${list.length} · Q / D pour changer`;
     const Wd = window.innerWidth, H = window.innerHeight, d = Math.min(H * 0.78, Wd * 0.7);
     ep.style.setProperty('--ex', `${Wd / 2}px`); ep.style.setProperty('--ey', `${H / 2}px`);
     ep.style.setProperty('--ed', `${d}px`); ep.style.setProperty('--ei', `${H / 2 + d / 2 + 6}px`);
     viewOffset.tx = viewOffset.ty = 0;
-    applyProjection(dt, 3.2);
-    if (k.has('fwd') || k.has('back') || k.has('left') || k.has('right')) { w.scope = false; hint('', 0); }
+    applyProjection(dt, fov);
     return;
   }
   const input = {
@@ -1782,7 +1851,9 @@ function updateWalker(dt) {
   // Indications
   if (hintTimer <= 0) {
     const shipLocal = obj.worldToLocal(ship.position.clone());
+    const it = life?.nearest(w);
     if (nearScope(w)) hint('E : regarder dans la grande lunette', 0.3);
+    else if (it) hint(`E : ${it.label}`, 0.3);
     else if (shipLocal.distanceTo(w.p) < 12 * W.m2u) hint('E : remonter à bord du vaisseau', 0.3);
     else if (w.swim) hint('À la nage', 0.3);
   }
@@ -2161,6 +2232,7 @@ function frame() {
     placeBodies(dt);
     updateTelescope(dt);
     for (const f of ticks) f(simTime);
+  life?.update(dt, simTime, mode === 'free' ? free.walker : null);
     updateSpaceWeather(dt);
     if (mode === 'free' && free.init) updateFree(dt);
     else if (current) updateCamera(dt);

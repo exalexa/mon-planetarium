@@ -28,7 +28,20 @@ function prep(geo, color) {
   tmpC.set(color);
   const n = g.attributes.position.count;
   const c = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { c[i * 3] = tmpC.r; c[i * 3 + 1] = tmpC.g; c[i * 3 + 2] = tmpC.b; }
+  // Matière moins plate : pied des murs assombri, dessous dans l'ombre, dessus éclairci,
+  // et une légère variation d'une face à l'autre (pierres, enduits, planches)
+  const P = g.attributes.position, N = g.attributes.normal;
+  let y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < n; i++) { const y = P.getY(i); if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const span = Math.max(y1 - y0, 1e-6);
+  for (let i = 0; i < n; i++) {
+    const t = (P.getY(i) - y0) / span, ny = N.getY(i);
+    const q = i - (i % 6);
+    const hsh = Math.sin((P.getX(q) + P.getX(q + 1) + P.getX(q + 2)) * 91.7 + (P.getY(q) + P.getY(q + 1) + P.getY(q + 2)) * 47.3 + (P.getZ(q) + P.getZ(q + 1) + P.getZ(q + 2)) * 73.1) * 43758.5;
+    let f = (0.87 + 0.15 * t) * (1 + ((hsh - Math.floor(hsh)) - 0.5) * 0.07);
+    if (ny < -0.5) f *= 0.78; else if (ny > 0.5) f *= 1.04;
+    c[i * 3] = tmpC.r * f; c[i * 3 + 1] = tmpC.g * f; c[i * 3 + 2] = tmpC.b * f;
+  }
   g.setAttribute('color', new THREE.BufferAttribute(c, 3));
   return g;
 }

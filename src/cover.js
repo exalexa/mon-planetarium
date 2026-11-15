@@ -363,16 +363,16 @@ function prefab(name) {
 // ---------------------------------------------------------------------------
 // Rm : rayon de l'astre en mètres (échelle du personnage). villages : [modèle, nombre de villages, maisons par village]
 export const THEMES = {
-  corneille: { villages: [['colombage', 6, 11]], extra: [['chapelle', 2], ['lampadaire', 30]], forests: [['feuillu', 6, 26], ['peuplier', 3, 14]], fields: [['champ', 10]], lakes: 3 },
+  corneille: { villages: [['colombage', 6, 11]], extra: [['chapelle', 2], ['lampadaire', 30]], forests: [['feuillu', 6, 26], ['peuplier', 3, 14]], fields: [['champ', 10]], lakes: 1, ocean: 0.07 },
   // Cluny : ville de pierre autour de l'enceinte, puis vallons de forêts, prés et vignes
   cluny: {
     zone: clunyZone,
     villages: [['pierre', 22, 12, 'town']], extra: [['chapelle', 3, 'meadow|vine'], ['lampadaire', 40, 'town'], ['feuillu', 700, 'forest'], ['pin', 120, 'forest'], ['feuillu', 60, 'meadow'], ['peuplier', 40, 'river|meadow']],
     forests: [], fields: [['vigne', 700, 'vine'], ['champ', 10, 'meadow']], lakes: 0,
   },
-  lutece: { villages: [['haussmann', 6, 7]], extra: [['lampadaire', 50], ['chapelle', 1]], forests: [['platane', 8, 12]], fields: [], lakes: 2 },
-  cenomane: { villages: [['pavillon', 7, 9]], extra: [['chapelle', 1], ['lampadaire', 20]], forests: [['feuillu', 6, 28], ['pin', 4, 20]], fields: [['champ', 8]], lakes: 3 },
-  massalia: { villages: [['mas', 6, 9]], extra: [['calcaire', 70], ['lampadaire', 14]], forests: [['pin', 6, 16], ['olivier', 5, 14], ['palmier', 3, 8]], fields: [['lavande', 10]], lakes: 0 },
+  lutece: { villages: [['haussmann', 6, 7]], extra: [['lampadaire', 50], ['chapelle', 1]], forests: [['platane', 8, 12]], fields: [], lakes: 0, ocean: 0.06 },
+  cenomane: { villages: [['pavillon', 7, 9]], extra: [['chapelle', 1], ['lampadaire', 20]], forests: [['feuillu', 6, 28], ['pin', 4, 20]], fields: [['champ', 8]], lakes: 1, ocean: 0.055 },
+  massalia: { villages: [['mas', 6, 9]], extra: [['calcaire', 70], ['lampadaire', 14]], forests: [['pin', 6, 16], ['olivier', 5, 14], ['palmier', 3, 8]], fields: [['lavande', 10]], lakes: 0, ocean: 0.26 },
   // Meudon : ville et jardins en bas, observatoire, forêt et étang sur le plateau ; pas de maison sur la voie du RER
   meudon: {
     zone: meudonZone, avoid: (d) => Math.abs(d.z - MEUDON.TRACK) < 0.06,

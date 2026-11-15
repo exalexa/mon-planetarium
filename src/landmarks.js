@@ -261,12 +261,62 @@ export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, gro
 }
 
 // ---------------------------------------------------------------------------
+// Pays autour d'un monument : le site reste plat, puis viennent collines, vallée d'un fleuve
+// (creusée dans la lune, mise en eau par le niveau de la mer du thème) ou littoral.
+// ---------------------------------------------------------------------------
+function country({ seed = 1, amp = 0.35, cap = 0.62, river = null, sea = null, cliffs = null, tones }) {
+  const ss = THREE.MathUtils.smoothstep;
+  const riverS = (d) => {
+    // Distance signée au cours du fleuve (petit cercle qui serpente)
+    const u = d.dot(river.n);
+    return u - river.c - 0.035 * Math.sin(Math.atan2(d.dot(river.a), d.dot(river.b)) * 5 + seed);
+  };
+  const seaS = (d) => d.dot(sea.n) - sea.c + 0.06 * (fbm3(d.x * 5 + seed, d.y * 5, d.z * 5) - 0.5);
+  const relief = (d) => {
+    const f = Math.acos(THREE.MathUtils.clamp(d.y, -1, 1));
+    const out = ss(f, cap + 0.08, cap + 0.5);
+    const n = fbm3(d.x * 2.6 + seed * 3.1, d.y * 2.6 - seed, d.z * 2.6 + 1.7);
+    let h = amp * out * Math.pow(n, 1.4) * 1.9;
+    if (river) {
+      const r = Math.abs(riverS(d));
+      // Fond de vallée large, lit du fleuve plus creux
+      h *= 0.25 + 0.75 * ss(r, 0.1, 0.34);
+      h -= river.depth * (1 - ss(r, river.w * 0.5, river.w)) * ss(f, cap + 0.02, cap + 0.12);
+    }
+    if (sea) {
+      const sv = seaS(d);
+      const isl = sea.islands ? Math.max(0, fbm3(d.x * 7 + 9, d.y * 7, d.z * 7 + seed) - 0.62) * 2.2 : 0;
+      h = THREE.MathUtils.lerp(h, -sea.depth + isl, ss(sv, -0.02, 0.07) * ss(f, cap, cap + 0.1));
+    }
+    return h;
+  };
+  const flatten = (d) => 1 - ss(Math.acos(THREE.MathUtils.clamp(d.y, -1, 1)), cap + 0.02, cap + 0.2);
+  const paint = (d) => {
+    const f = Math.acos(THREE.MathUtils.clamp(d.y, -1, 1));
+    if (f < cap - 0.02) return null;
+    if (river && Math.abs(riverS(d)) < river.w * 0.55) return tones.bed;
+    if (sea) { const sv = seaS(d); if (sv > 0.05) return relief(d) > -sea.depth * 0.75 ? tones.rock : tones.bed; if (sv > 0.0) return tones.beach ?? tones.bed; }
+    const h = relief(d);
+    const n2 = fbm3(d.x * 9 + seed, d.y * 9, d.z * 9);
+    // Falaises : seulement le front du coteau, sauf massif rocheux (calanques)
+    if (cliffs && h > amp * cliffs && (sea || h < amp * (cliffs + 0.14))) return tones.rock;
+    if (h > amp * 0.42) return tones.wood;
+    // Parcellaire : champs en damier irrégulier
+    if (tones.fields && f > cap + 0.25) return tones.fields[Math.floor(n2 * 7.99) % tones.fields.length];
+    return tones.grass;
+  };
+  return { relief, flatten, paint };
+}
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
+
+// ---------------------------------------------------------------------------
 // Lycée Pierre Corneille, Rouen
 // Ailes classiques en pierre autour d'une cour d'honneur, toits d'ardoise à lucarnes,
 // chapelle Saint-Louis à façade blanche (deux ordres, baie en plein cintre, fronton, statues, escalier).
 // ---------------------------------------------------------------------------
 export function lyceeCorneille(R = 4) {
   const g = new THREE.Group();
+  Object.assign(g.userData, country({ seed: 3, amp: 0.5, cliffs: 0.5, river: { n: V3(0.15, -0.35, 1), a: V3(1, 0, -0.15), b: V3(0, 1, 0.35), c: 0.42, w: 0.11, depth: 0.2 }, tones: { bed: 0x6c8d92, rock: 0xe9e4d2, wood: 0x3f6136, grass: 0x7fa155, fields: [0x8fae5c, 0xb9b262, 0x7a9c4e, 0xa6b86a] } }));
   // Cour d'honneur gravillonnée, qui épouse la sphère
   const court = sphereBand(R, 0, 0.75, 0xd9cfba, 0.004);
   court.userData.noDrape = true;
@@ -659,6 +709,7 @@ export function abbayeCluny(R = 4) {
 // ---------------------------------------------------------------------------
 export function ensamParis(R = 4) {
   const g = new THREE.Group();
+  Object.assign(g.userData, country({ seed: 5, amp: 0.22, river: { n: V3(-0.2, -0.3, -1), a: V3(1, 0, -0.2), b: V3(0, 1, -0.3), c: 0.4, w: 0.1, depth: 0.16 }, tones: { bed: 0x6f8f8a, rock: 0xd8d2c2, wood: 0x4a6a3e, grass: 0xa9a48f } }));
   // Façade sur le boulevard de l'Hôpital, cour intérieure pavée bordée d'ailes, halles au fond
   const court = sphereBand(R, 0, 0.62, 0xcfc6b4, 0.0042);
   court.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0, R, 0.38).normalize());
@@ -719,6 +770,7 @@ export function ensamParis(R = 4) {
 // ---------------------------------------------------------------------------
 export function universiteLeMans(R) {
   const g = new THREE.Group();
+  Object.assign(g.userData, country({ seed: 7, amp: 0.3, river: { n: V3(1, -0.3, 0.2), a: V3(-0.2, 0, 1), b: V3(0.3, 1, 0), c: 0.45, w: 0.09, depth: 0.16 }, tones: { bed: 0x6e8e86, rock: 0xcbb98f, wood: 0x3b5c33, grass: 0x7da453, fields: [0x86aa58, 0x9bb463, 0x6f9648, 0xb5b56a, 0x7da453] } }));
   const accent = 0xe07a3a;
   const a = structure(g, -0.35, -0.35);
   const ka = kitOf(a);
@@ -768,6 +820,7 @@ export function universiteLeMans(R) {
 // ---------------------------------------------------------------------------
 export function amuMarseille(R) {
   const g = new THREE.Group();
+  Object.assign(g.userData, country({ seed: 9, amp: 0.62, cliffs: 0.3, sea: { n: V3(-0.55, -0.35, 0.75), c: 0.28, depth: 0.3, islands: true }, tones: { bed: 0xd9cfa8, beach: 0xe6dcb8, rock: 0xefeadc, wood: 0x5d7a45, grass: 0xb9ad7c } }));
   const white = mat(0xf2eee4), green = mat(0x7a9278);
   const gold = new THREE.MeshStandardMaterial({ color: 0xd4a640, emissive: 0xffb540, emissiveIntensity: 1.6 });
   // Colline calcaire, assez douce pour y monter à pied
@@ -1152,10 +1205,26 @@ export function observatoireMeudon(R = 4) {
   // Petite coupole (table équatoriale)
   const dome = (px, py, r = 0.16) => {
     const st = atMap(px, py, 0);
-    hollow(kitOf(st), { w: r * 2.1, d: r * 2.1, h: 0.26, floors: 1, wall: 0xeeeae2, inner: 0xf0e8d8, doors: { '+z': 0 }, furnish: 'observatory', seed: 22 });
-    cyl(st, r, r, 0.05, 18, mat(0xeeeae2), 0, 0.26, 0);
-    add(st, new THREE.SphereGeometry(r * 1.02, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf4f4f0), 0, 0.31, 0);
-    add(st, new THREE.BoxGeometry(r * 0.35, r * 0.9, 0.02), mat(0x3a3f45), 0, 0.31 + r * 0.45, r * 0.93).rotation.x = -0.5;
+    const k = kitOf(st);
+    // Tambour cylindrique blanc, soubassement, bandeau, porte et galerie à garde-corps
+    k.cyl(r * 1.08, r * 1.12, 0.05, 0, 0, 0, 0xcfc8ba, { seg: 20 });
+    k.cyl(r, r, 0.27, 0, 0.05, 0, 0xf1eee6, { seg: 20 });
+    k.cyl(r * 1.1, r * 1.1, 0.018, 0, 0.3, 0, 0xd9d4c8, { seg: 20, collide: false });
+    k.box(0.05, 0.11, 0.012, 0, 0.05, r - 0.002, 0x5a4634, { collide: false });
+    for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2 + 0.8; k.box(0.035, 0.05, 0.01, Math.sin(a) * r, 0.18, Math.cos(a) * r, 0x9fc0d8, { collide: false, glow: true, rotY: a }); }
+    for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; k.box(0.006, 0.04, 0.006, Math.sin(a) * r * 1.08, 0.318, Math.cos(a) * r * 1.08, 0x8f979e, { collide: false }); }
+    add(st, new THREE.TorusGeometry(r * 1.08, 0.004, 4, 28), mat(0x8f979e), 0, 0.36, 0, [Math.PI / 2, 0, 0]);
+    // Coupole à cimier ouvert, orientée vers l'amas ; la lunette dépasse par la trappe
+    const top = new THREE.Group(); top.position.y = 0.32; top.rotation.y = 2.2 + px * 0.01; st.add(top);
+    const GAPD = 0.5;
+    const shell = new THREE.SphereGeometry(r * 1.02, 22, 9, Math.PI / 2 + GAPD / 2, Math.PI * 2 - GAPD, 0, Math.PI / 2);
+    top.add(new THREE.Mesh(shell, new THREE.MeshStandardMaterial({ color: 0xf4f3ee, metalness: 0.2, roughness: 0.6, flatShading: true })));
+    top.add(new THREE.Mesh(shell, new THREE.MeshStandardMaterial({ color: 0x2c2d33, side: THREE.BackSide })));
+    for (const sgn of [-1, 1]) add(top, new THREE.TorusGeometry(r * 1.03, 0.005, 4, 14, Math.PI / 2), mat(0xaab2b8), 0, 0, 0, [0, sgn * (GAPD / 2) - Math.PI / 2 + (sgn > 0 ? 0 : 0), 0]);
+    const tube = new THREE.CylinderGeometry(r * 0.16, r * 0.14, r * 1.5, 10); tube.rotateX(Math.PI / 2);
+    const tb = add(top, tube, mat(0xe8e6e0), 0, r * 0.28, r * 0.25); tb.rotation.x = -0.75;
+    add(top, new THREE.CylinderGeometry(r * 0.17, r * 0.17, 0.012, 10), mat(0x30343a), 0, r * 0.28 + Math.sin(0.75) * r * 0.75, r * 0.25 + Math.cos(0.75) * r * 0.75, [Math.PI / 2 - 0.75, 0, 0]);
+    cyl(top, r * 0.1, r * 0.14, r * 0.3, 8, mat(0x5a5f66), 0, 0, 0);
     spot(px, py, r * 1.6 + 0.05);
   };
 
@@ -1244,6 +1313,14 @@ export function observatoireMeudon(R = 4) {
     cyl(ts, 0.33, 0.33, 0.07, 28, mat(0xdcdcd8), 0, 1.73, 0);
     add(ts, new THREE.CylinderGeometry(0.3, 0.3, 0.06, 28, 1, true), glow(0x9fc8e0, 0.9), 0, 1.83, 0);
     add(ts, new THREE.SphereGeometry(0.3, 28, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x8c9298), 0, 1.86, 0).scale.y = 0.25;
+    // Porte, baies en fente, escalier de secours hélicoïdal, cœlostat sous son abri
+    const kt = kitOf(ts);
+    kt.box(0.06, 0.12, 0.012, 0, 0, 0.092, 0x4a5560, { collide: false });
+    for (let i = 0; i < 6; i++) kt.box(0.02, 0.07, 0.01, 0, 0.3 + i * 0.22, 0.088, 0x9fc8e0, { collide: false, glow: true });
+    for (let i = 0; i < 70; i++) { const a = i * 0.32; kt.box(0.06, 0.008, 0.03, Math.sin(a) * 0.125, 0.05 + i * 0.0215, Math.cos(a) * 0.125, 0x8f979e, { collide: false, rotY: a }); }
+    for (let i = 0; i < 20; i++) { const a = (i / 20) * Math.PI * 2; kt.box(0.008, 0.05, 0.008, Math.sin(a) * 0.33, 1.8, Math.cos(a) * 0.33, 0x8f979e, { collide: false }); }
+    kt.box(0.1, 0.08, 0.1, 0, 1.93, 0, 0xdcdcd8, { collide: false });
+    add(ts, new THREE.CylinderGeometry(0.05, 0.05, 0.008, 14), new THREE.MeshStandardMaterial({ color: 0xcfe6ff, metalness: 0.9, roughness: 0.1, emissive: 0x6688aa, emissiveIntensity: 0.5 }), 0, 2.05, 0, [0.9, 0.4, 0]);
     spot(219, 298, 0.25);
   }
   // Coupoles et tables équatoriales de la prairie

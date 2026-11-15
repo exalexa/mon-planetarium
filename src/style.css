@@ -997,3 +997,6 @@ body.free-tpv:not(.show-info) :is(#astro-info-container, #explore-tree, #free-he
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+/* Soleil au cœlostat : filtre Hα */
+#eyepiece.sun .eyepiece-ring { background: radial-gradient(circle, rgba(255, 70, 20, 0.16), rgba(150, 0, 0, 0.3)); }
