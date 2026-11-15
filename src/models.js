@@ -614,42 +614,66 @@ export function createShip() {
     const on = k > 0.005;
     [main, inner, ...sides, halo, sparks].forEach((o) => { o.visible = on && !o.userData.off; });
   };
-  // Coque fournie (modèle 3D) : remplace la coque dessinée ; les flammes sortent de ses deux réacteurs
-  g.userData.setHull = (model, length = 1.75) => {
-    hullParts.forEach((o) => { if (!navLights.includes(o)) o.visible = false; });
-    const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
-    const k = length / size.z;
-    model.scale.setScalar(k);
-    model.position.set(-((box.min.x + box.max.x) / 2) * k, -0.9 - box.min.y * k, -((box.min.z + box.max.z) / 2) * k);
-    g.add(model);
-    // Réacteurs : sommets les plus en arrière, de part et d'autre de l'axe
+  // Coques fournies (modèles 3D) : remplacent la coque dessinée. Plusieurs variantes (vaisseau du vol libre,
+  // sonde Voyager du pilote automatique) ; seule la variante active est visible.
+  const variants = {};
+  const flames = [main, inner, ...sides, halo, sparks];
+  g.userData.addVariant = (name, model, { length = null, width = null, rotX = 0, engines = true } = {}) => {
+    const holder = new THREE.Group();
+    holder.add(model);
+    model.rotation.x = rotX;
     model.updateMatrixWorld(true);
-    const v = new THREE.Vector3(), acc = { l: [0, 0, 0, 0], r: [0, 0, 0, 0] };
-    let zMin = Infinity;
-    const pts = [];
-    model.traverse((o) => {
-      if (!o.isMesh) return;
-      const pa = o.geometry.attributes.position;
-      for (let i = 0; i < pa.count; i += 3) { v.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld); pts.push(v.x, v.y, v.z); zMin = Math.min(zMin, v.z); }
-    });
-    for (let i = 0; i < pts.length; i += 3) {
-      if (pts[i + 2] > zMin + length * 0.06) continue;
-      const a = pts[i] < 0 ? acc.l : acc.r;
-      a[0] += pts[i]; a[1] += pts[i + 1]; a[2] += pts[i + 2]; a[3]++;
+    const box = new THREE.Box3().setFromObject(holder), size = box.getSize(new THREE.Vector3());
+    const k = length ? length / size.z : width / size.x;
+    model.scale.multiplyScalar(k);
+    holder.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(holder);
+    model.position.set(-(b2.min.x + b2.max.x) / 2, engines ? -0.9 - b2.min.y : -(b2.min.y + b2.max.y) / 2, -(b2.min.z + b2.max.z) / 2);
+    holder.visible = false;
+    g.add(holder);
+    const v = { holder, engines, size: b2.getSize(new THREE.Vector3()) };
+    if (engines) {
+      // Réacteurs : sommets les plus en arrière, de part et d'autre de l'axe
+      holder.updateMatrixWorld(true);
+      const p = new THREE.Vector3(), acc = { l: [0, 0, 0, 0], r: [0, 0, 0, 0] };
+      let zMin = Infinity;
+      const pts = [];
+      holder.traverse((o) => {
+        if (!o.isMesh) return;
+        const pa = o.geometry.attributes.position;
+        for (let i = 0; i < pa.count; i += 3) { p.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld); pts.push(p.x, p.y, p.z); zMin = Math.min(zMin, p.z); }
+      });
+      const L = v.size.z;
+      for (let i = 0; i < pts.length; i += 3) {
+        if (pts[i + 2] > zMin + L * 0.06) continue;
+        const a = pts[i] < 0 ? acc.l : acc.r;
+        a[0] += pts[i]; a[1] += pts[i + 1]; a[2] += pts[i + 2]; a[3]++;
+      }
+      v.eng = [acc.l, acc.r].filter((a) => a[3]).map((a) => new THREE.Vector3(a[0] / a[3], a[1] / a[3], a[2] / a[3]));
+      v.zMin = zMin;
     }
-    const eng = [acc.l, acc.r].filter((a) => a[3]).map((a) => new THREE.Vector3(a[0] / a[3], a[1] / a[3], a[2] / a[3]));
+    variants[name] = v;
+  };
+  g.userData.setVariant = (name) => {
+    const v = variants[name];
+    if (!v) return;
+    hullParts.forEach((o) => { o.visible = false; });
+    for (const w of Object.values(variants)) w.holder.visible = w === v;
+    // Flammes et feux de position : seulement pour le vaisseau à réacteurs
+    for (const f of flames) f.userData.off = !v.engines;
+    navLights.forEach((o) => { o.visible = v.engines; });
+    if (!v.engines) return;
     main.userData.off = inner.userData.off = true;
     sides.forEach((f, i) => {
-      const e = eng[i] || eng[0];
+      const e = v.eng[i] || v.eng[0];
       if (!e) return;
-      f.position.set(e.x, e.y, zMin + 0.02);
+      f.position.set(e.x, e.y, v.zMin + 0.02);
       f.scale.set(0.55, 0.55, 0.7);
     });
-    halo.position.set(0, eng[0]?.y ?? 0, zMin - 0.1);
+    halo.position.set(0, v.eng[0]?.y ?? 0, v.zMin - 0.1);
     for (const o of navLights) {
-      // Feux de position au bout des ailes
-      if (Math.abs(o.position.x) > 0.3) o.position.set(Math.sign(o.position.x) * size.x * k * 0.47, -0.62, zMin + length * 0.12);
-      else o.position.set(0, -0.9 + size.y * k * 0.98, -0.1);
+      if (Math.abs(o.position.x) > 0.3 || o.userData.wing) { o.userData.wing = true; o.position.set(Math.sign(o.position.x || 1) * v.size.x * 0.47, -0.62, v.zMin + v.size.z * 0.12); }
+      else o.position.set(0, -0.9 + v.size.y * 0.98, -0.1);
     }
   };
   return g;

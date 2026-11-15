@@ -102,6 +102,8 @@ const trail = new THREE.Line(
 trail.frustumCulled = false;
 trail.visible = false;
 scene.add(trail);
+// Pas de traînée continue derrière le vaisseau
+trail.visible = false;
 
 // Éjections de masse coronale (deux en vol au plus)
 const cmes = [0, 1].map(() => {
@@ -1339,12 +1341,17 @@ try { mode = localStorage.getItem(MODE_KEY) === 'free' ? 'free' : 'auto'; } catc
 const VIEW_KEY = 'sysE139.views';
 const views = { auto: 'fpv', free: 'tpv' };
 try { Object.assign(views, JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch (e) { /* ignore */ }
+// Pilote automatique : on suit la sonde Voyager (vue extérieure seulement) ; le vaisseau n'existe qu'en vol libre
+views.auto = 'tpv';
 const qFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 function syncLayout() {
   document.body.classList.toggle('cockpit', cockpitLayout());
   const btn = document.getElementById('view-toggle');
   btn.textContent = views[mode] === 'fpv' ? 'Vue cockpit' : 'Vue extérieure';
   btn.classList.toggle('fpv', views[mode] === 'fpv');
+  btn.hidden = mode !== 'free';
+  ship.userData.setVariant?.(mode === 'free' ? 'awing' : 'voyager');
+  shipLen1 = 0;
   document.body.classList.toggle('walking', mode === 'free' && !!free.walker);
   document.body.classList.toggle('free-mode', mode === 'free');
   document.body.classList.toggle('tpv-screens', tpvScreens());
@@ -1354,6 +1361,7 @@ function syncLayout() {
   computeViewOffset();
 }
 function toggleView() {
+  if (mode !== 'free') return;
   views[mode] = views[mode] === 'fpv' ? 'tpv' : 'fpv';
   try { localStorage.setItem(VIEW_KEY, JSON.stringify(views)); } catch (e) { /* ignore */ }
   trail.userData.n = 0;
@@ -1362,7 +1370,7 @@ function toggleView() {
 document.getElementById('view-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggleView(); e.currentTarget.blur(); });
 const free = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), offset: new THREE.Vector3(), ang: new THREE.Vector3(),
-  anchor: null, target: null, near: null, keys: new Set(), dist: 4.2, camPos: new THREE.Vector3(), init: false,
+  anchor: null, target: null, near: null, keys: new Set(), dist: 3.2, camPos: new THREE.Vector3(), init: false,
   landed: null, walker: null, shipScale: 0.9, touchRot: { x: 0, y: 0 },
   // Gaz des moteurs (montée en régime progressive) : principal, latéral, vertical, post-combustion
   thr: new THREE.Vector3(), boostLvl: 0, retro: 0, reverseHold: 0,
@@ -2459,13 +2467,13 @@ function loadModel(name) {
     else gltfLoader.load(import.meta.env.BASE_URL + 'models/' + name + '.glb', ok, undefined, ko);
   });
 }
-const assetsP = Promise.all(['vaisseau', 'pnj'].map(loadModel)).then(([vaisseau, pnj]) => {
-  Object.assign(MODELS, { vaisseau, pnj });
-  if (vaisseau) {
-    toonify(vaisseau);
-    ship.userData.setHull(vaisseau);
-    shipLen1 = 0;
-  }
+const assetsP = Promise.all(['vaisseau', 'voyager', 'pnj'].map(loadModel)).then(([vaisseau, voyager, pnj]) => {
+  Object.assign(MODELS, { vaisseau, voyager, pnj });
+  if (vaisseau) { toonify(vaisseau); ship.userData.addVariant('awing', vaisseau, { length: 1.75, engines: true }); }
+  // Voyager : antenne parabolique tournée vers l'arrière (vers le Soleil et la Terre), mât du magnétomètre dressé
+  if (voyager) { toonify(voyager); ship.userData.addVariant('voyager', voyager, { width: 1.7, rotX: -Math.PI / 2, engines: false }); }
+  ship.userData.setVariant(mode === 'free' ? 'awing' : 'voyager');
+  shipLen1 = 0;
   return MODELS;
 });
 if (window.__PLANETARIUM_GLB__) {
