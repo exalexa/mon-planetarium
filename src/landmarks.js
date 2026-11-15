@@ -40,12 +40,19 @@ function treeAt(g, x, z, s = 1, color = 0x4c7a3d) {
 
 // Aile de bâtiment classique, longueur selon X local, façade principale vers +Z.
 // Creuse : portes au centre des deux façades, escaliers, planchers, salles meublées.
-function wing(s, { len, depth, h, floors, wall = C.stone, roof = C.slate, roofH = 0.3, mansard = true, dormersN = 0, x = 0, z = 0, lit = true, furnish = 'school', doors = { '+z': 0, '-z': 0 }, seed = 1 }) {
+function wing(s, { len, depth, h, floors, wall = C.stone, roof = C.slate, roofH = 0.3, mansard = true, flat = false, dormersN = 0, x = 0, z = 0, lit = true, furnish = 'school', doors = { '+z': 0, '-z': 0 }, seed = 1 }) {
   const k = kitOf(s);
   hollow(k, { w: len, d: depth, h, x, z, floors, wall, doors, furnish, seed, inner: 0xf1e9d8 });
   // Corniche
   faceBands(k, len, depth, x, z, h - 0.035, 0.035, 0xf6f0e2, { out: 0.012 });
-  if (mansard) mansardRoof(s, len, roofH, depth, mat(roof), x, h, z);
+  if (flat) {
+    // Toit-terrasse à balustrade (ailes du Château-Neuf de Meudon)
+    k.box(len, 0.012, depth, x, h, z, 0xd8ccb2);
+    for (const sz of [1, -1]) {
+      k.box(len, 0.012, 0.018, x, h + 0.05, z + sz * (depth / 2 - 0.01), wall, { collide: false });
+      for (let i = 0; i <= Math.round(len / 0.035); i++) k.box(0.01, 0.04, 0.01, x - len / 2 + i * 0.035, h + 0.01, z + sz * (depth / 2 - 0.01), wall, { collide: false });
+    }
+  } else if (mansard) mansardRoof(s, len, roofH, depth, mat(roof), x, h, z);
   else gableRoof(s, len, roofH, depth, mat(roof), x, h, z);
   // Fenêtres éclairées (sauf au droit des portes)
   const fh = h / floors, cols = Math.max(2, Math.round(len / 0.19));
@@ -155,15 +162,19 @@ function drape(group, R) {
       k.build(c);
     }
     const n = new THREE.Vector3(x, Math.sqrt(Math.max(R * R - x * x - z * z, 0.01)), z).normalize();
-    c.position.copy(n).multiplyScalar(R + y0 - 0.004);
+    // Relief à deux niveaux (Meudon) : le bâtiment se pose sur le niveau de son terrain
+    const relief = group.userData.relief;
+    const lift = c.userData.lift ?? (relief ? relief(n) : 0);
+    c.position.copy(n).multiplyScalar(R + y0 + lift - 0.004);
     c.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(UP, n));
   }
   group.userData.afterDrape?.(group);
 }
 
 // Lune au relief doux ; la calotte nord reste légèrement sous le niveau R pour accueillir la pelouse
-function createMoon({ radius, seed, colors, cap = 0.62 }) {
-  const geometry = new THREE.IcosahedronGeometry(radius, 5);
+function createMoon({ radius, seed, colors, cap = 0.62, relief = null, flatten = null, ground = null }) {
+  // Relief à niveaux : maillage fin pour que les ruptures de pente suivent les murs
+  const geometry = new THREE.IcosahedronGeometry(radius, relief ? 44 : 5);
   const pos = geometry.attributes.position;
   const v = new THREE.Vector3();
   const rnd = mulberry32(seed * 77);
@@ -173,15 +184,17 @@ function createMoon({ radius, seed, colors, cap = 0.62 }) {
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i).normalize();
     let h = 1 + (fbm3(v.x * 3 + seed, v.y * 3, v.z * 3) - 0.5) * 0.09;
-    for (const { c, r } of craters) {
+    if (!relief) for (const { c, r } of craters) {
       const d = v.distanceTo(c);
       if (d < r) { const k = d / r; h -= 0.06 * (1 - k * k) - 0.02 * Math.exp(-Math.pow((k - 0.92) * 9, 2)); }
     }
     // Près du pôle, le sol rejoint doucement la sphère idéale
     const t = THREE.MathUtils.smoothstep(v.y, cosCap - 0.15, cosCap);
-    h = THREE.MathUtils.lerp(h, 0.992, t);
+    h = THREE.MathUtils.lerp(h, relief ? 0.999 : 0.992, t);
+    if (flatten) h = THREE.MathUtils.lerp(h, 0.999, flatten(v));
     hs[i] = h;
-    v.multiplyScalar(radius * h);
+    const lift = relief ? relief(v) : 0;
+    v.multiplyScalar(radius * h + lift);
     pos.setXYZ(i, v.x, v.y, v.z);
   }
   const cols = new Float32Array(pos.count * 3);
@@ -191,6 +204,13 @@ function createMoon({ radius, seed, colors, cap = 0.62 }) {
     const t = THREE.MathUtils.clamp((h - 0.93) / 0.1, 0, 1);
     const k = Math.min(colors.length - 2, Math.floor(t * (colors.length - 1)));
     c.set(colors[k]).lerp(new THREE.Color(colors[k + 1]), t * (colors.length - 1) - k);
+    if (ground != null) {
+      // Pelouse peinte dans la lune elle-même (pas de calotte rapportée)
+      const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
+      const vy = cy / Math.hypot(cx, cy, cz);
+      const edge = Math.cos(cap) - 0.015 * (Math.sin(Math.atan2(cz, cx) * 7 + seed) + 1);
+      if (vy > edge) c.set(ground);
+    }
     for (let j = 0; j < 3; j++) cols.set([c.r, c.g, c.b], (i + j) * 3);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(cols, 3));
@@ -204,8 +224,11 @@ function createMoon({ radius, seed, colors, cap = 0.62 }) {
 // Assemble lune + pelouse + monument drapé (le reste de la lune est peuplé ensuite, voir cover.js)
 export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, ground = C.grass, cap = 0.62 }) {
   const moon = new THREE.Group();
-  moon.add(createMoon({ radius, seed, colors, cap }));
+  const lm = landmark(radius);
+  const relief = lm.userData.relief || null;
+  moon.add(createMoon({ radius, seed, colors, cap, relief, flatten: lm.userData.flatten || null, ground: relief ? ground : null }));
   // Pelouse / sol aménagé en calotte, bord légèrement irrégulier
+  if (!relief) {
   const lawn = new THREE.Mesh(
     new THREE.SphereGeometry(radius + 0.003, 64, 14, 0, Math.PI * 2, 0, cap),
     new THREE.MeshStandardMaterial({ color: ground, roughness: 1 })
@@ -222,7 +245,7 @@ export function createLandmarkMoon({ radius = 4, seed = 1, colors, landmark, gro
   lawn.geometry.computeVertexNormals();
   lawn.userData.terrain = true;
   moon.add(lawn);
-  const lm = landmark(radius);
+  }
   drape(lm, radius);
   moon.add(lm);
   moon.userData.topY = radius;
@@ -261,7 +284,7 @@ export function lyceeCorneille(R = 4) {
   // Cheminées
   for (const x of [-0.9, 0, 0.9]) box(main, 0.08, 0.2, 0.08, mat(0xb9ad95), x, 1.0, 0);
   // Petite cour des cuisines derrière l'aile ouest
-  const cuis = sphereBand(R, 0, 0.12, 0xcfc4ad, 0.0042);
+  const cuis = sphereBand(R, 0, 0.32, 0xcfc4ad, 0.0042);
   cuis.quaternion.setFromUnitVectors(UP, new THREE.Vector3(-1.05, R, -1.05).normalize());
   cuis.userData.noDrape = true; g.add(cuis);
 
@@ -371,7 +394,7 @@ export function abbayeCluny(R = 4) {
   wing(structure(g, 1.4, 0.17, Math.PI / 2), { len: 0.85, depth: 0.45, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 3, furnish: 'library', seed: 27 });
   wing(structure(g, -0.3, 0.17, -Math.PI / 2), { len: 0.85, depth: 0.45, h: 0.72, floors: 3, wall: C.stoneLight, dormersN: 3, furnish: 'school', seed: 28 });
   // Préau du cloître : pelouse, allées en croix, puits
-  const garth = sphereBand(R, 0, 0.115, 0x86a85e, 0.0042);
+  const garth = sphereBand(R, 0, 0.42, 0x86a85e, 0.0042);
   garth.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0.55, R, 0.17).normalize());
   garth.userData.noDrape = true; g.add(garth);
   const cl = structure(g, 0.55, 0.17, 0, false);
@@ -418,7 +441,7 @@ export function abbayeCluny(R = 4) {
 export function ensamParis(R = 4) {
   const g = new THREE.Group();
   // Façade sur le boulevard de l'Hôpital, cour intérieure pavée bordée d'ailes, halles au fond
-  const court = sphereBand(R, 0, 0.17, 0xcfc6b4, 0.0042);
+  const court = sphereBand(R, 0, 0.62, 0xcfc6b4, 0.0042);
   court.quaternion.setFromUnitVectors(UP, new THREE.Vector3(0, R, 0.38).normalize());
   court.userData.noDrape = true; g.add(court);
   for (const sx of [-1, 1]) wing(structure(g, sx * 1.6, 0.05, sx * Math.PI / 2), { len: 1.4, depth: 0.42, h: 0.8, floors: 3, wall: 0xe2d6bd, roof: C.zinc, roofH: 0.24, dormersN: 4, furnish: sx > 0 ? 'lab' : 'office', seed: 30 + sx });
@@ -593,10 +616,37 @@ export function amuMarseille(R) {
 // On entre par le pavillon central, on monte ses trois étages puis l'escalier du tambour
 // jusqu'au plancher de la coupole, où se trouve la grande lunette.
 // ---------------------------------------------------------------------------
-export function observatoireMeudon() {
+// Relief de Meudon : la lune elle-même a deux niveaux. Le plateau haut (observatoire, forêt, lac) garde
+// le rayon R ; la moitié basse (jardin, ville, RER) est creusée de H. La limite est un plan passant par le
+// centre (deux moitiés de même surface), incliné pour passer au pied de la terrasse : s = z − K·y = 0.
+// Sous le château, la rupture est brutale et cachée dans l'épaisseur du mur de terrasse ;
+// ailleurs, la forêt descend en pente et relie les deux niveaux.
+export const MEUDON = { H: 0.8, Z0: 0.75, R: 4, TRACK: 0.6, K: 0.75 / Math.sqrt(16 - 0.5625) };
+export function meudonS(d) { return (d.z - MEUDON.K * d.y) / Math.hypot(1, MEUDON.K); }
+function meudonRelief(d) {
+  const s = meudonS(d);
+  const sharp = THREE.MathUtils.smoothstep(s, -0.062, -0.022);
+  const wide = THREE.MathUtils.smoothstep(s, -0.16, 0.16);
+  const k = (1 - THREE.MathUtils.smoothstep(Math.abs(d.x), 0.47, 0.6)) * THREE.MathUtils.smoothstep(d.y, 0.6, 0.72);
+  return -MEUDON.H * THREE.MathUtils.lerp(wide, sharp, k);
+}
+function meudonFlatten(d) {
+  // Plate-forme de la voie ferrée (cercle z = TRACK)
+  return 1 - THREE.MathUtils.smoothstep(Math.abs(d.z - MEUDON.TRACK), 0.03, 0.055);
+}
+export function meudonZone(d) {
+  // Plateau, pente boisée ou partie basse (sous la terrasse, la limite est franche)
+  const s = meudonS(d), sharp = Math.abs(d.x) < 0.5 && d.y > 0.66;
+  if (sharp) return s < -0.07 ? 'high' : s > 0.005 ? 'low' : 'slope';
+  return s < -0.17 ? 'high' : s > 0.17 ? 'low' : 'slope';
+}
+
+export function observatoireMeudon(R = 4) {
   const g = new THREE.Group();
-  // Le Château-Neuf repose sur un soubassement ; on y monte par un escalier à double révolution
-  const c0 = structure(g, 0, 0.2);
+  g.userData.relief = meudonRelief;
+  g.userData.flatten = meudonFlatten;
+  // Le Château-Neuf repose sur un soubassement, au bord de la terrasse ; escalier à double révolution
+  const c0 = structure(g, 0, -0.15);
   const k0 = kitOf(c0);
   const POD = 0.12;
   k0.box(2.86, POD, 1.24, 0, 0, 0, 0xd2c6ad);
@@ -626,7 +676,7 @@ export function observatoireMeudon() {
   // Ailes du château, de part et d'autre du pavillon central
   for (const sx of [-1, 1]) {
     const s = new THREE.Group(); s.position.x = sx * 1.0; c.add(s);
-    wing(s, { len: 0.8, depth: 0.62, h: 0.72, floors: 2, wall: 0xe8dec8, roofH: 0.26, furnish: 'observatory', doors: { '+z': 0 }, seed: 19 + sx });
+    wing(s, { len: 0.8, depth: 0.62, h: 0.72, floors: 2, wall: 0xe4d4b4, flat: true, furnish: 'observatory', doors: { '+z': 0 }, seed: 19 + sx });
     s.userData.kit.build(s); delete s.userData.kit;
   }
   // Pavillon central carré : hall, deux étages de bureaux, escalier jusqu'au toit-terrasse sous le tambour
@@ -714,30 +764,149 @@ export function observatoireMeudon() {
   const eye = new THREE.Object3D(); eye.name = 'eyepiece'; eye.position.set(0, 0, 0.53); alt.add(eye);
   // Pavillon : son kit est assemblé ici (il n'est pas enfant direct du monument)
   c.userData.kit.build(c); delete c.userData.kit;
-  // Grande Terrasse (Le Vau, XVIIe s.) devant le château : esplanade, balustrade, mur de soutènement
-  const t = structure(g, 0, 1.45);
-  const kt = kitOf(t);
-  kt.box(3.0, 0.03, 0.6, 0, 0, 0, 0xd8cfbd);
-  for (let i = 0; i < 30; i++) cyl(t, 0.012, 0.012, 0.08, 5, mat(0xefe7d6), -1.45 + i * 0.1, 0.03, 0.28);
-  kt.box(3.0, 0.02, 0.03, 0, 0.11, 0.28, 0xefe7d6);
-  kt.solid(-1.5, 0.03, 0.265, 1.5, 0.13, 0.295);
-  for (const x of [-0.75, 0.75]) { kt.box(0.5, 0.004, 0.3, x, 0.03, -0.05, 0x86a85e, { collide: false }); }
-  // Tour solaire (1960-1970) : fût carré d'environ 35 m surmonté d'une petite coupole
-  const ts = structure(g, 1.85, -0.25);
-  const kts = kitOf(ts);
-  kts.box(0.16, 1.85, 0.16, 0, 0, 0, 0xe8e6e0);
-  for (let i = 0; i < 6; i++) kts.box(0.17, 0.02, 0.17, 0, 0.25 + i * 0.28, 0, 0xc8c6c0, { collide: false });
-  kts.box(0.24, 0.05, 0.24, 0, 1.85, 0, 0xc8c6c0);
-  add(ts, new THREE.SphereGeometry(0.1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf4f4f0), 0, 1.9, 0);
-  kts.box(0.05, 0.1, 0.01, 0, 0, 0.085, 0x3b2b20, { collide: false });
-  // Petites coupoles (télescope de 1 m, lunette photographique), creuses
-  for (const [x, z] of [[-1.45, -0.7], [1.4, -0.75]]) {
+  // Terrasse (mur de soutènement en pierre et brique, niches, balustrade) entre le plateau et le jardin bas.
+  // Découpée en tronçons pour épouser la courbure ; escaliers latéraux vers le jardin.
+  const H = MEUDON.H;
+  for (let i = -2; i <= 2; i++) {
+    const x = i * 0.76;
+    const w = structure(g, x, MEUDON.Z0, 0, false);
+    w.userData.lift = 0;
+    const kw = kitOf(w);
+    const brick = Math.abs(x) < 0.1;
+    // Mur épais : son dessus est le sol de la terrasse, la rupture du relief est noyée dedans
+    kw.box(0.78, H + 0.6, 0.06, 0, -H - 0.6, -0.03, brick ? 0xa8664c : 0xcdbd9c);
+    kw.box(0.78, H + 0.6, 0.34, 0, -H - 0.6, -0.23, 0xbfae8c);
+    kw.box(0.8, 0.025, 0.08, 0, 0, -0.03, 0xe6dcc6, { collide: false });
+    for (const by of [-H * 0.33, -H * 0.66]) kw.box(0.79, 0.012, 0.065, 0, by, -0.03, 0xb3a283, { collide: false });
+    if (brick) for (const nx of [-0.25, 0, 0.25]) kw.box(0.08, 0.16, 0.01, nx, -H + 0.08, 0.005, 0x4a3326, { collide: false });
+    // Balustrade (ouverte au droit des escaliers)
+    for (let j = 0; j < 16; j++) {
+      const bx = -0.375 + j * 0.05;
+      if (Math.abs(x + bx) > 0.3 && Math.abs(x + bx) < 0.52) continue;
+      kw.box(0.012, 0.05, 0.012, bx, 0, -0.02, 0xefe7d6, { collide: false });
+    }
+    const gaps = [[-0.52, -0.3], [0.3, 0.52]].map(([a0, a1]) => [a0 - x, a1 - x]);
+    let a0 = -0.39;
+    for (const [g0, g1] of [...gaps, [0.39, 0.39]].sort((p, q) => p[0] - q[0])) {
+      const e = Math.min(g0, 0.39);
+      if (e > a0) { kw.box(e - a0, 0.015, 0.03, (a0 + e) / 2, 0.05, -0.02, 0xefe7d6); kw.solid(a0, 0, -0.035, e, 0.07, -0.005); }
+      a0 = Math.max(a0, Math.min(g1, 0.39));
+    }
+    // Haies taillées au pied du mur
+    if (Math.abs(x) > 1.4) kw.box(0.36, 0.22, 0.12, Math.sign(x) * 0.18, -H, 0.12, 0x3f6a34);
+  }
+  // Escaliers latéraux : du haut de la terrasse (x = ±0,41) jusqu'au jardin, le long du mur
+  for (const sx of [-1, 1]) {
+    const st = structure(g, sx * 0.75, MEUDON.Z0 + 0.075, 0, false);
+    st.userData.lift = 0;
+    const ks = kitOf(st);
+    const n = Math.ceil(H / M(0.19)), r = H / n, run = 0.95 / n;
+    for (let i = 0; i < n; i++) {
+      const top = -(i + 1) * r;
+      // On descend depuis l'ouverture de la balustrade vers l'extérieur
+      const xi = -sx * 0.34 + sx * (i * run + run / 2);
+      ks.box(run, top + H + 0.6, 0.12, xi, -H - 0.6, 0, 0xc8bca6);
+    }
+    // Garde-corps côté jardin, qui suit la volée
+    for (let i = 0; i < n; i += 6) ks.box(run * 6, 0.05, 0.012, -sx * 0.34 + sx * (i + 3) * run, -(i + 3) * r, 0.065, 0xefe7d6, { collide: false });
+  }
+  // Jardin bas : bassin circulaire, parterres et haies
+  const bs = structure(g, 0, 1.3, 0, false);
+  bs.userData.lift = -H;
+  const kb = kitOf(bs);
+  add(bs, new THREE.TorusGeometry(0.3, 0.02, 6, 40), mat(0xd8cfbd), 0, 0.02, 0, [Math.PI / 2, 0, 0]);
+  const pool = add(bs, new THREE.CircleGeometry(0.29, 40), new THREE.MeshStandardMaterial({ color: 0x5a8fa8, roughness: 0.2, emissive: 0x0b2c44, emissiveIntensity: 0.3 }), 0, 0.012, 0, [-Math.PI / 2, 0, 0]);
+  pool.userData.water = true;
+  kb.ring(0, 0, 0.3, -0.02, 0.04);
+  for (const [x, z] of [[-0.7, 0], [0.7, 0], [-0.7, 0.45], [0.7, 0.45]]) kb.box(0.45, 0.08, 0.28, x, 0, z, 0x4f7a3e);
+  // Petites coupoles (tables équatoriales), chacune prolongée d'un bâtiment bas
+  for (const [x, z] of [[-1.15, -1.0], [1.05, -1.0]]) {
     const s = structure(g, x, z);
-    hollow(kitOf(s), { w: 0.42, d: 0.42, h: 0.32, floors: 1, wall: 0xe6dcc6, inner: 0xf0e8d8, doors: { '+z': 0 }, furnish: 'observatory', seed: 22 });
-    cyl(s, 0.2, 0.2, 0.06, 16, mat(0xe6dcc6), 0, 0.32, 0);
+    const ks = kitOf(s);
+    hollow(ks, { w: 0.42, d: 0.42, h: 0.32, floors: 1, wall: 0xeeeae2, inner: 0xf0e8d8, doors: { '+z': 0 }, furnish: 'observatory', seed: 22 });
+    hollow(ks, { w: 0.62, d: 0.26, h: 0.2, x: Math.sign(x) * 0.52, z: 0, floors: 1, wall: 0xeeeae2, inner: 0xf3f0ea, doors: { '+z': 0 }, furnish: 'office', seed: 23 });
+    cyl(s, 0.2, 0.2, 0.06, 16, mat(0xeeeae2), 0, 0.32, 0);
     add(s, new THREE.SphereGeometry(0.21, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf4f4f0), 0, 0.38, 0);
   }
-  for (const [x, z, s] of [[-1.75, 0.3, 1.2], [-1.1, -1.3, 1.1], [0.2, -1.4, 1], [1.0, -1.3, 1.15], [-0.6, -1.1, 0.9]]) treeAt(g, x, z, s, 0x3c6634);
+  // Tour solaire : fût cylindrique blanc d'environ 35 m, plate-forme en soucoupe vitrée au sommet
+  const ts = structure(g, 1.55, -1.25, 0, false);
+  ts.userData.colliders = { boxes: [], cyls: [[0, 0, 0.1, -0.1, 1.9]], rings: [] };
+  cyl(ts, 0.085, 0.095, 1.62, 18, mat(0xeeeeea), 0, -0.05, 0);
+  cyl(ts, 0.32, 0.1, 0.16, 28, mat(0xeeeeea), 0, 1.57, 0);
+  cyl(ts, 0.33, 0.33, 0.07, 28, mat(0xdcdcd8), 0, 1.73, 0);
+  add(ts, new THREE.CylinderGeometry(0.3, 0.3, 0.06, 28, 1, true), glow(0x9fc8e0, 0.9), 0, 1.83, 0);
+  add(ts, new THREE.SphereGeometry(0.3, 28, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x8c9298), 0, 1.86, 0).scale.y = 0.25;
+  // Interféromètre solaire : rangée d'instruments sur une base est-ouest
+  const it = structure(g, -1.35, -1.55, 0.6);
+  const ki = kitOf(it);
+  ki.box(1.0, 0.02, 0.08, 0, 0, 0, 0xc8c4bc);
+  for (let i = 0; i < 5; i++) {
+    const ix = -0.4 + i * 0.2;
+    ki.cyl(0.02, 0.025, 0.12, ix, 0.02, 0, 0xe8e8e4);
+    add(it, new THREE.SphereGeometry(0.06, 12, 5, 0, Math.PI * 2, 0, Math.PI / 3), mat(0xf2f2f0, { side: THREE.DoubleSide }), ix, 0.2, 0, [Math.PI * 0.75, 0, 0]);
+  }
+  // Antennes de radioastronomie
+  for (const [x, z, sc] of [[-1.85, -0.35, 1.2], [-1.6, 0.2, 0.9], [1.8, -0.45, 1]]) {
+    const a = structure(g, x, z, 0, false);
+    a.userData.colliders = { boxes: [], cyls: [[0, 0, 0.05 * sc, -0.05, 0.3 * sc]], rings: [] };
+    cyl(a, 0.025 * sc, 0.04 * sc, 0.3 * sc, 8, mat(0xd8dce0), 0, 0, 0);
+    add(a, new THREE.SphereGeometry(0.22 * sc, 18, 6, 0, Math.PI * 2, 0, Math.PI / 3), mat(0xf0f0ee, { side: THREE.DoubleSide }), 0, 0.42 * sc, 0, [Math.PI * 0.7, 0.4, 0]);
+  }
+  for (const [x, z, s] of [[-1.85, 0.05, 1.2], [-0.5, -1.45, 1.1], [0.35, -1.6, 1], [0.95, -1.55, 1.15], [1.85, 0.4, 1]]) treeAt(g, x, z, s, 0x3c6634);
+
+  // RER C : voie ferrée en cercle autour de la partie basse, gare de Meudon-Val-Fleury, train qui circule
+  const ZT = MEUDON.TRACK, th = Math.acos(ZT);
+  const toZ = new THREE.Quaternion().setFromUnitVectors(UP, new THREE.Vector3(0, 0, 1));
+  const rail = new THREE.Group(); rail.userData.noDrape = true; g.add(rail);
+  for (const [a0, a1, col, lift] of [[th - 0.028, th + 0.028, 0x8a8478, 0.004], [th - 0.013, th - 0.009, 0xb8bcc0, 0.007], [th + 0.009, th + 0.013, 0xb8bcc0, 0.007]]) {
+    const RL = R - H;
+    const b = sphereBand(RL, RL * Math.sin(a0), RL * Math.sin(a1), col, lift, 160);
+    b.quaternion.copy(toZ);
+    rail.add(b);
+  }
+  const st = structure(g, 0, R * ZT, 0, false);
+  st.userData.lift = -H;
+  const kst = kitOf(st);
+  for (const sz of [-1, 1]) {
+    kst.box(1.1, 0.055, 0.14, 0, -0.04, sz * 0.2, 0xb8b2a6);
+    for (const px of [-0.4, 0, 0.4]) kst.cyl(0.01, 0.01, 0.16, px, 0.015, sz * 0.24, 0x5a6670);
+    kst.box(0.95, 0.015, 0.1, 0, 0.175, sz * 0.23, 0x2f5f8a, { collide: false });
+  }
+  kst.box(0.6, 0.12, 0.08, 0, 0.015, -0.32, 0xd8cdb8);
+  const sign = textPlane('RER C · MEUDON-VAL-FLEURY', 0.5, 0.05, { color: '#ffffff', bg: '#2f5f8a' });
+  sign.position.set(0, 0.22, 0.29); st.add(sign);
+  // Train à deux niveaux (4 voitures), animé le long de la voie
+  const train = new THREE.Group(); train.userData.noDrape = true; g.add(train);
+  const cars = [];
+  for (let i = 0; i < 4; i++) {
+    const car = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.17, 0.42), mat(0xf2f2f0)); body.position.y = 0.1; car.add(body);
+    for (const [y, c] of [[0.07, 0x1d3f7a], [0.135, 0x1d3f7a], [0.025, 0xc8323a]]) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.102, 0.03, 0.4), y === 0.025 ? mat(c) : glow(0x9fd0ff, 0.5)); band.position.y = y + 0.015; car.add(band);
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.015, 0.4), mat(0x9aa0a8)); roof.position.y = 0.19; car.add(roof);
+    train.add(car); cars.push(car);
+  }
+  const RT = R - H + 0.002;
+  const ringR = Math.sqrt(1 - ZT * ZT) * RT;
+  const p = new THREE.Vector3(), up = new THREE.Vector3(), tan = new THREE.Vector3(), side = new THREE.Vector3(), m = new THREE.Matrix4();
+  const place = (car, phi) => {
+    p.set(Math.cos(phi) * ringR, Math.sin(phi) * ringR, ZT * RT);
+    up.copy(p).normalize();
+    tan.set(-Math.sin(phi), Math.cos(phi), 0);
+    side.crossVectors(up, tan).normalize();
+    m.makeBasis(side, up, tan);
+    car.quaternion.setFromRotationMatrix(m);
+    car.position.copy(p);
+  };
+  // Un tour en 90 s, dont 10 s d'arrêt en gare (au point le plus haut du cercle, φ = π/2)
+  train.userData.tick = (t) => {
+    const T = 90, dwell = 10, u = ((t % T) + T) % T;
+    const s = u < dwell ? 0 : THREE.MathUtils.smoothstep(u, dwell, dwell + 6) * 0 + (u - dwell) / (T - dwell);
+    const phi = Math.PI / 2 + s * Math.PI * 2;
+    cars.forEach((c, i) => place(c, phi - (i - 1.5) * (0.44 / ringR)));
+  };
+  train.userData.tick(0);
   return g;
 }
 

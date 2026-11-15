@@ -3,6 +3,9 @@
 // et chaque bâtiment est creux, meublé et praticable (volumes de collision par instance).
 import * as THREE from 'three';
 import { Kit, hollow, faceBands, facadeWindows, M, U, rng, kitSolid, kitGlow, kitGlass } from './kit.js';
+import { meudonZone, MEUDON } from './landmarks.js';
+// Zone demandée (ex. 'high|slope') : vrai si la direction tombe dans l'une d'elles
+const zoneOk = (theme, d, zone) => !zone || !theme.zone || zone.split('|').includes(theme.zone(d));
 
 // ---------------------------------------------------------------------------
 // Échantillonneur de surface : rayon du sol dans une direction donnée (repère local de l'astre)
@@ -365,7 +368,12 @@ export const THEMES = {
   lutece: { villages: [['haussmann', 6, 7]], extra: [['lampadaire', 50], ['chapelle', 1]], forests: [['platane', 8, 12]], fields: [], lakes: 2 },
   cenomane: { villages: [['pavillon', 7, 9]], extra: [['chapelle', 1], ['lampadaire', 20]], forests: [['feuillu', 6, 28], ['pin', 4, 20]], fields: [['champ', 8]], lakes: 3 },
   massalia: { villages: [['mas', 6, 9]], extra: [['calcaire', 70], ['lampadaire', 14]], forests: [['pin', 6, 16], ['olivier', 5, 14], ['palmier', 3, 8]], fields: [['lavande', 10]], lakes: 0 },
-  meudon: { villages: [['meuliere', 5, 9]], extra: [['lampadaire', 20]], forests: [['feuillu', 12, 34], ['pin', 4, 16]], fields: [], lakes: 3 },
+  // Meudon : ville et jardins en bas, observatoire, forêt et étang sur le plateau ; pas de maison sur la voie du RER
+  meudon: {
+    zone: meudonZone, avoid: (d) => Math.abs(d.z - MEUDON.TRACK) < 0.06,
+    villages: [['meuliere', 8, 9, 'low']], extra: [['lampadaire', 28, 'low'], ['antenne', 4, 'high']],
+    forests: [['feuillu', 14, 34, 'high|slope'], ['pin', 6, 16, 'high|slope'], ['feuillu', 3, 10, 'low']], fields: [], lakes: 2, lakeZone: 'high',
+  },
   glenos: { villages: [['labo', 3, 4], ['pavillon', 3, 7]], extra: [['antenne', 6], ['lampadaire', 18]], forests: [['feuillu', 5, 22]], fields: [['champ', 4]], lakes: 2 },
   enedis: { villages: [['pavillon', 3, 6]], extra: [['eolienne', 22], ['solaire', 30], ['lampadaire', 10]], forests: [['feuillu', 4, 18]], fields: [['champ', 8]], lakes: 2 },
   nocturne: { villages: [['mas', 3, 7], ['colombage', 2, 6]], extra: [['kiosque', 6], ['lampadaire', 60]], forests: [['feuillu', 5, 22], ['peuplier', 3, 10]], fields: [['lavande', 4]], lakes: 2 },
@@ -450,18 +458,22 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
   for (let i = 0, tries = 0; i < nl && tries < 200; tries++) {
     const dir = randDir();
     if (excluded(dir)) continue;
+    if (theme.lakeZone && !zoneOk(theme, dir, theme.lakeZone)) continue;
+    if (theme.avoid && theme.avoid(dir)) continue;
     const ang = (M(14 + rnd() * 14) / U) * m2u / R;
     if (lakes.some((L) => L.dir.angleTo(dir) < (L.ang + ang) * 1.4)) continue;
     sampler.query(dir, q); if (q.r < 0) continue;
     // Niveau : un peu sous le plus bas de la rive
-    let rim = Infinity;
+    let rim = Infinity, bad = false;
     const t1 = new THREE.Vector3().crossVectors(dir, Math.abs(dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
     const t2 = new THREE.Vector3().crossVectors(dir, t1);
     for (let a = 0; a < 12; a++) {
       const p = dir.clone().addScaledVector(t1, Math.cos(a) * ang).addScaledVector(t2, Math.sin(a) * ang).normalize();
+      // Toute la rive doit rester dans la zone voulue (pas de lac à cheval sur deux niveaux)
+      if ((theme.lakeZone && !zoneOk(theme, p, theme.lakeZone)) || (theme.avoid && theme.avoid(p)) || excluded(p)) bad = true;
       sampler.query(p, q); if (q.r > 0) rim = Math.min(rim, q.r);
     }
-    if (!isFinite(rim)) continue;
+    if (bad || !isFinite(rim)) continue;
     const ice = i >= (theme.lakes || 0);
     lakes.push({ dir, ang, level: rim - 0.6 * m2u, depth: 3 * m2u, ice });
     i++;
@@ -491,9 +503,11 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
   const instances = {};
   const colliders = [];
   const up = new THREE.Vector3(0, 1, 0);
-  const tryPlace = (name, dir, yaw, margin = 1) => {
+  const tryPlace = (name, dir, yaw, margin = 1, zone = null) => {
     const P = prefab(name);
     if (excluded(dir)) return false;
+    if (!zoneOk(theme, dir, zone)) return false;
+    if (theme.avoid && theme.avoid(dir)) return false;
     const def = P.def;
     const fr = Math.hypot(P.hx, P.hz) * S;
     const ang = (fr / R) * margin;
@@ -539,19 +553,21 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
     const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * angR;
     return c.clone().addScaledVector(t1, Math.cos(a) * r).addScaledVector(t2, Math.sin(a) * r).normalize();
   };
-  const goodCenter = () => {
+  const goodCenter = (zone = null) => {
     for (let t = 0; t < 60; t++) {
       const c = randDir();
       if (excluded(c)) continue;
+      if (!zoneOk(theme, c, zone)) continue;
+      if (theme.avoid && theme.avoid(c)) continue;
       sampler.query(c, q);
       if (q.r > 0 && !isWater(c, q.r)) return c;
     }
     return null;
   };
   // Villages : maisons tournées vers la place du village
-  for (const [name, nv, nh] of theme.villages || []) {
+  for (const [name, nv, nh, zone] of theme.villages || []) {
     for (let v = 0; v < nv; v++) {
-      const c = goodCenter(); if (!c) continue;
+      const c = goodCenter(zone); if (!c) continue;
       const spread = (M(18 + nh * 2.4) / U) * m2u / R;
       let placed = 0;
       for (let t = 0; t < nh * 12 && placed < nh; t++) {
@@ -561,14 +577,14 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
         const t2 = new THREE.Vector3().crossVectors(dir, t1);
         const toC = c.clone().sub(dir);
         const yaw = Math.atan2(toC.dot(t1), -toC.dot(t2)) + (rnd() - 0.5) * 0.3;
-        if (tryPlace(name, dir, yaw, 1.15)) placed++;
+        if (tryPlace(name, dir, yaw, 1.15, zone)) placed++;
       }
       // Lampadaires autour de la place
-      for (let l = 0; l < 4; l++) tryPlace('lampadaire', near(c, spread * 0.4), rnd() * 6.28, 1);
+      for (let l = 0; l < 4; l++) tryPlace('lampadaire', near(c, spread * 0.4), rnd() * 6.28, 1, zone);
     }
   }
-  for (const [name, n] of theme.extra || []) {
-    for (let i = 0, t = 0; i < n && t < n * 8; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, PREFABS[name].tree ? 1 : 1.1)) i++;
+  for (const [name, n, zone] of theme.extra || []) {
+    for (let i = 0, t = 0; i < n && t < n * 8; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, PREFABS[name].tree ? 1 : 1.1, zone)) i++;
   }
   for (const [name, n] of theme.fields || []) {
     if (name === 'vigne') {
@@ -583,11 +599,11 @@ export function populate(b, { center, m2u = null, theme, seed, exclude, waterMat
       }
     } else for (let i = 0, t = 0; i < n && t < n * 8; t++) if (tryPlace(name, randDir(), rnd() * Math.PI * 2, 1)) i++;
   }
-  for (const [name, nf, nt] of theme.forests || []) {
+  for (const [name, nf, nt, zone] of theme.forests || []) {
     for (let f = 0; f < nf; f++) {
-      const c = goodCenter(); if (!c) continue;
+      const c = goodCenter(zone); if (!c) continue;
       const spread = (M(16 + nt * 0.9) / U) * m2u / R;
-      for (let i = 0, t = 0; i < nt && t < nt * 4; t++) if (tryPlace(name, near(c, spread), rnd() * 6.28, 1)) i++;
+      for (let i = 0, t = 0; i < nt && t < nt * 4; t++) if (tryPlace(name, near(c, spread), rnd() * 6.28, 1, zone)) i++;
     }
   }
   // Maillages instanciés

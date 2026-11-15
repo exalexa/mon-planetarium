@@ -465,6 +465,8 @@ function buildSystem(gltf) {
   }
   byId.lexa.viewRadius = SUN_RADIUS;
   setupWalking();
+  // Éléments animés des monuments (train du RER à Meudon…)
+  for (const b of BODIES) b.obj?.traverse((o) => { if (o.userData.tick) ticks.push(o.userData.tick); });
   ready = true;
 }
 
@@ -509,6 +511,7 @@ function colliderGroups(obj) {
   }
   return { groups: out, scope };
 }
+const ticks = [];
 function setupWalking() {
   const t0 = performance.now();
   for (const b of BODIES) {
@@ -2157,6 +2160,7 @@ function frame() {
   if (ready) {
     placeBodies(dt);
     updateTelescope(dt);
+    for (const f of ticks) f(simTime);
     updateSpaceWeather(dt);
     if (mode === 'free' && free.init) updateFree(dt);
     else if (current) updateCamera(dt);
@@ -2170,6 +2174,16 @@ function frame() {
   }
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
+  // Test : caméra imposée dans le repère d'un astre (?debug)
+  const dc = window.__debug?.cam;
+  if (dc && byId[dc.id]) {
+    const o = byId[dc.id].obj;
+    camera.position.copy(o.localToWorld(new THREE.Vector3(...dc.from)));
+    camera.up.copy(new THREE.Vector3(...dc.up || dc.from).normalize().transformDirection(o.matrixWorld));
+    camera.lookAt(o.localToWorld(new THREE.Vector3(...dc.to)));
+    camera.near = 0.002; camera.updateProjectionMatrix();
+    camera.clearViewOffset();
+  }
   composer.render();
   if (ready && cockpitLayout()) {
     renderer.autoClear = false;
