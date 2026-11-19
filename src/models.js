@@ -605,6 +605,54 @@ export function createShip() {
   const sparks = new THREE.Points(sparkGeo, sparkMat);
   sparks.frustumCulled = false;
   g.add(sparks);
+  // Jets de plasma des réacteurs (Z, Maj+Z) : cône étroit bleu-blanc avec diamants de choc, longueur selon la poussée
+  const plasmaMat = (hot) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTime: { value: 0 }, uLvl: { value: 0 }, uHot: { value: hot } },
+    vertexShader: /* glsl */ `
+      varying float vT; varying vec3 vN; varying vec3 vV; uniform float uLvl, uTime;
+      void main() {
+        vT = clamp(-position.z, 0.0, 1.0);
+        vec3 p = position; p.xy *= 1.0 - 0.45 * vT + 0.04 * sin(uTime * 60.0 + p.z * 14.0);
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      varying float vT; varying vec3 vN; varying vec3 vV; uniform float uLvl, uTime, uHot;
+      void main() {
+        float rim = 0.55 + 0.45 * pow(abs(dot(vN, vV)), 0.8);
+        float diam = 0.65 + 0.35 * pow(abs(sin(vT * 22.0 - uTime * 9.0)), 6.0);
+        float a = rim * (1.0 - vT * 0.9) * diam * (0.5 + 1.1 * uLvl);
+        vec3 col = mix(vec3(1.0, 1.0, 1.0), mix(vec3(0.35, 0.65, 1.6), vec3(0.9, 0.35, 1.2), uHot), smoothstep(0.0, 0.85, vT));
+        gl_FragColor = vec4(col * a * 0.4, 1.0);
+      }`,
+  });
+  const plasmaGeo = new THREE.ConeGeometry(0.17, 1, 18, 8, true);
+  plasmaGeo.translate(0, 0.5, 0); plasmaGeo.rotateX(-Math.PI / 2);   // base à la tuyère, pointe vers −Z
+  const plasma = [-1, 1].map((sx) => { const m = new THREE.Mesh(plasmaGeo, plasmaMat(0)); m.position.set(sx * 0.55, 0.05, -0.7); m.visible = false; m.userData.flame = true; g.add(m); return m; });
+  // Propulseurs verticaux (Espace / C) : quatre petits jets sous la coque et sur le dessus
+  const vjGeo = new THREE.ConeGeometry(0.07, 1, 10, 4, true); vjGeo.translate(0, 0.5, 0); vjGeo.rotateX(-Math.PI / 2);
+  const vjets = [];
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (const dir of [-1, 1]) {
+    const m = new THREE.Mesh(vjGeo, plasmaMat(0)); m.userData.flame = true; m.userData.dir = dir; m.visible = false;
+    m.rotation.x = dir < 0 ? -Math.PI / 2 : Math.PI / 2;   // dir −1 : jet vers le bas (poussée montante)
+    g.add(m); vjets.push([m, sx, sz]);
+  }
+  g.userData.vjets = vjets;
+  g.userData.setJets = (level, upIn, t, boost) => {
+    for (const m of plasma) {
+      m.visible = level > 0.04 && !!g.userData.plasmaOn;
+      m.material.uniforms.uTime.value = t; m.material.uniforms.uLvl.value = level;
+      m.material.uniforms.uHot.value = boost;
+      m.scale.set(0.8 + boost * 0.3, 0.8 + boost * 0.3, 0.25 + level * 0.55 + boost * 0.35);
+    }
+    for (const [m] of vjets) {
+      const on = g.userData.plasmaOn && ((upIn > 0 && m.userData.dir < 0) || (upIn < 0 && m.userData.dir > 0));
+      m.visible = !!on;
+      if (on) { m.material.uniforms.uTime.value = t; m.material.uniforms.uLvl.value = 0.8; m.scale.set(1, 0.45 + Math.random() * 0.12, 1); }
+    }
+  };
   const mats = [main, inner, ...sides].map((m) => m.material).concat([sparkMat]);
   g.userData.setThrust = (k, t) => {
     mats.forEach((m) => { m.uniforms.uTime.value = t; m.uniforms.uThrust.value = k; });
@@ -639,10 +687,11 @@ export function createShip() {
       const p = new THREE.Vector3(), acc = { l: [0, 0, 0, 0], r: [0, 0, 0, 0] };
       let zMin = Infinity;
       const pts = [];
+      const hInv = new THREE.Matrix4().copy(holder.matrixWorld).invert(), rel = new THREE.Matrix4();
       holder.traverse((o) => {
         if (!o.isMesh) return;
         const pa = o.geometry.attributes.position;
-        for (let i = 0; i < pa.count; i += 3) { p.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld); pts.push(p.x, p.y, p.z); zMin = Math.min(zMin, p.z); }
+        for (let i = 0; i < pa.count; i += 3) { p.fromBufferAttribute(pa, i).applyMatrix4(rel.multiplyMatrices(hInv, o.matrixWorld)); pts.push(p.x, p.y, p.z); zMin = Math.min(zMin, p.z); }
       });
       const L = v.size.z;
       for (let i = 0; i < pts.length; i += 3) {
@@ -666,15 +715,20 @@ export function createShip() {
     halo.userData.off = sparks.userData.off = true;
     // Feux de bout d'aile seulement (pas de feu sur le dos, au centre de l'image en vue arrière)
     navLights.forEach((o, i) => { o.visible = v.engines && i < 2; });
+    g.userData.plasmaOn = v.engines;
     if (!v.engines) return;
     main.userData.off = inner.userData.off = true;
     sides.forEach((f, i) => {
       const e = v.eng[i] || v.eng[0];
       if (!e) return;
       f.position.set(e.x, e.y, v.zMin + 0.02);
-      f.scale.set(0.55, 0.55, 0.7);
+      f.scale.set(0.32, 0.32, 0.3);
     });
     halo.position.set(0, v.eng[0]?.y ?? 0, v.zMin - 0.1);
+    plasma.forEach((m, i) => { const e = v.eng[i] || v.eng[0]; if (e) m.position.set(e.x, e.y, v.zMin - 0.02); });
+    const b = v.size;
+    for (const [m, sx, sz] of vjets) m.position.set(sx * b.x * 0.3, m.userData.dir < 0 ? -0.9 : -0.9 + b.y, sz * b.z * 0.22);
+    g.userData.plasmaOn = true;
     for (const o of navLights) {
       if (Math.abs(o.position.x) > 0.3 || o.userData.wing) { o.userData.wing = true; o.position.set(Math.sign(o.position.x || 1) * v.size.x * 0.47, -0.62, v.zMin + v.size.z * 0.12); }
       else o.position.set(0, -0.9 + v.size.y * 0.98, -0.1);

@@ -23,7 +23,7 @@ const deg = Math.PI / 180;
 // view : réglages de cadrage caméra (pitch = élévation en radians, dist = multiplicateur de distance)
 export const SYSTEM = [
   {
-    id: 'lexa', name: 'LEXA', section: 'Accueil', color: '#ffb35c', kind: 'star', glb: 'Etoile',
+    id: 'lexa', name: 'LEXA-E139', section: 'Accueil', color: '#ffb35c', kind: 'star', glb: 'Etoile',
   },
   // ---------- Planètes rocheuses ----------
   {
@@ -34,7 +34,7 @@ export const SYSTEM = [
     orbit: { a: 151, e: 0.0068, i: 3.39, node: 1.338, peri: 0.958, M0: 2.1 },
     atmosphere: { color: '#8ee6a6', shell: 1.2, radius: 5.9, strength: 0.55 },
     children: [
-      { id: 'corneille', name: 'CORNEILLE', section: 'Lycée Pierre Corneille, Rouen', landmark: L.lyceeCorneille, moon: { seed: 11, ground: 0xc9bea4, colors: [0x6b6f72, 0x8b8e8a, 0xb7b6a8] }, orbit: { a: 14, e: 0.02, i: 1.0, node: 0.3, peri: 1.2, M0: 0.2 } },
+      { id: 'corneille', name: 'ROTAMAGUS', section: 'Lycée Pierre Corneille, Rouen', landmark: L.lyceeCorneille, moon: { seed: 11, ground: 0xc9bea4, colors: [0x6b6f72, 0x8b8e8a, 0xb7b6a8] }, orbit: { a: 14, e: 0.02, i: 1.0, node: 0.3, peri: 1.2, M0: 0.2 } },
       { id: 'cluny', name: 'CLUNY', section: 'Abbaye de Cluny, Arts et Métiers', landmark: L.abbayeCluny, moon: { seed: 12, ground: 0x86a65c, colors: [0x6c6152, 0x8e8068, 0xbfb08a] }, orbit: { a: 18, e: 0.03, i: -1.5, node: 2.5, peri: 2.4, M0: 1.5 } },
       { id: 'lutece', name: 'LUTÈCE', section: 'Arts et Métiers, Paris', landmark: L.ensamParis, moon: { seed: 13, ground: 0xb9b2a2, colors: [0x5f6470, 0x7d8290, 0xaeb2b8] }, orbit: { a: 22, e: 0.025, i: 0.8, node: 4.9, peri: 3.6, M0: 2.9 } },
       { id: 'cenomane', name: 'CÉNOMANE', section: 'Le Mans Université', landmark: L.universiteLeMans, moon: { seed: 14, ground: 0x86a85c, colors: [0x5d6a4e, 0x7c8c5c, 0x9fb07a] }, orbit: { a: 26, e: 0.035, i: -1.0, node: 0.9, peri: 4.8, M0: 4.2 } },
@@ -65,7 +65,7 @@ export const SYSTEM = [
     children: [
       { id: 'simulx', name: 'SIMULX_5', section: 'Jumeau numérique · point L2', glb: 'Cube002', glbScale: 0.5, lagrange: { point: 'L2', Ax: 1.5, Ay: 6, Az: 4, period: 70, wz: 1 }, spin: 0.05 },
       { id: 'glenos', name: 'GLÉNOS', section: "Prothèse d'épaule", landmark: L.implantLab, moon: { seed: 33, scale: 0.28, ground: 0x9fa58f, colors: [0x6d675f, 0x8a8378, 0xa9a194] }, orbit: { a: 9, e: 0.015, i: 1.1, node: 2.7, peri: 2.4, M0: 1.6 } },
-      { id: 'enedis', name: 'ENEDIS', section: 'Data Challenge', landmark: L.enedisPylon, moon: { seed: 31, scale: 0.3, ground: 0x7e9f5a, colors: [0x4f5a52, 0x6a7a66, 0x8fa284] }, orbit: { a: 12.5, e: 0.0151, i: 1.08, node: 4.9, peri: 3.6, M0: 2.9 } },
+      { id: 'enedis', name: 'ENERGIA', section: 'Data Challenge', landmark: L.enedisPylon, moon: { seed: 31, scale: 0.3, ground: 0x7e9f5a, colors: [0x4f5a52, 0x6a7a66, 0x8fa284] }, orbit: { a: 12.5, e: 0.0151, i: 1.08, node: 4.9, peri: 3.6, M0: 2.9 } },
       { id: 'ricochet', name: 'RICOCHET', section: 'TIPE', build: () => M.ricochetMoon(1.0), radius: 1.0, view: { pitch: 0.8, dist: 1.15 }, orbit: { a: 16, e: 0.0003, i: 0.9, node: 0.7, peri: 4.7, M0: 4.1 }, spin: 0.04 },
       { id: 'c4d3x', name: 'C4D3X', section: 'Code et projets personnels', glb: 'Cube013', glbScale: 0.45, orbit: { a: 20, e: 0.02, i: 1.8, node: 2.7, peri: 5.8, M0: 5.3 }, spin: 0.2 },
     ],

@@ -8,6 +8,7 @@ import {
   createAurora, createBowShock, createCME,
 } from './effects.js';
 import { createShip, globularCluster } from './models.js';
+import { createIss } from './iss.js';
 import { populate, THEMES } from './cover.js';
 import { stepWalker, walkerView, PERSON } from './walker.js';
 import { buildInterior, buildLaunchComplex } from './shipdeck.js';
@@ -929,7 +930,19 @@ function bezier(a, b, c, d, t) {
 // qui partent de là où elle se trouve et arrivent par l'extérieur de l'astre visé.
 // La souris ne fait que tourner la caméra autour de la sonde.
 // ---------------------------------------------------------------------------
-const probe = { pos: new THREE.Vector3(), q: new THREE.Quaternion(), init: false, hidden: false };
+const mkProbe = () => ({ pos: new THREE.Vector3(), q: new THREE.Quaternion(), init: false, hidden: false });
+// Deux véhicules : la station (fenêtres sur l'astre visité) et la sonde Voyager (astres très lointains, vus sur une télé de la station)
+const probes = { iss: mkProbe(), voy: mkProbe() };
+let probe = probes.iss;
+const vehBody = { iss: null, voy: null };
+const FAR = new Set(['pluton', 'charon', 'haumea', 'makemake', 'eris', 'ceres']);
+const vehFor = (b) => (FAR.has(b.id) ? 'voy' : 'iss');
+function useVehicle(want) {
+  const p = probes[want];
+  if (p === probe) return;
+  if (!p.init && want === 'voy' && probes.iss.init) { p.pos.copy(probes.iss.pos); p.q.copy(probes.iss.q); p.init = true; }
+  probe = p;
+}
 // Point de stationnement : celui de la vue de l'astre, sans l'orbite de la souris, décalé du côté d'arrivée
 function parkFrame(b) {
   const sy = user.yaw, sp = user.pitch;
@@ -1028,6 +1041,20 @@ function transferPhase(tr) {
 
 const qTmp = new THREE.Quaternion();
 const mTmp = new THREE.Matrix4();
+const tvPose = { iss: null, voy: null, voyOn: false };
+const issObj = new THREE.Group(); issObj.visible = false; scene.add(issObj);
+const issLook = { yaw: 0, pitch: 0 }, qIssLook = new THREE.Quaternion(), eIss = new THREE.Euler();
+
+function placeVehicle(kind, st, body, thrust) {
+  const d = THREE.MathUtils.clamp(st.pos.distanceTo(bodyCenter(body)) * 0.1, 1.2, 16);
+  if (kind === 'voy') {
+    ship.visible = st.init; ship.position.copy(st.pos); ship.quaternion.copy(st.q);
+    ship.scale.setScalar(d * 0.075); ship.userData.setThrust(thrust, simTime);
+  } else {
+    issObj.visible = st.init; issObj.position.copy(st.pos); issObj.quaternion.copy(st.q); issObj.scale.setScalar(d * 0.075);
+  }
+}
+const issOn = () => mode === 'auto' && ready && !!current && !current.telescope && probes.iss.init;
 function updateCamera(dt) {
   user.yaw += (user.tYaw - user.yaw) * Math.min(1, dt * 6);
   user.pitch += (user.tPitch - user.pitch) * Math.min(1, dt * 6);
@@ -1036,6 +1063,7 @@ function updateCamera(dt) {
   const targetFov = f.fov ?? 50;
   let fov = targetFov;
   ship.visible = trail.visible = false;
+  issObj.visible = false;
   camera.up.set(0, 1, 0);
   autoThrust = 0;
   // ---- Lunette : la caméra seule, sonde masquée ----
@@ -1089,26 +1117,54 @@ function updateCamera(dt) {
       probe.q.slerp(qLookAlong(probe.pos, pf.look.clone().sub(probe.pos).normalize()), 1 - Math.exp(-dt * 2));
       trans = trans && trans.kind === 'probe' ? trans : null;
     }
-    // ---- Caméra : derrière la sonde ; la souris la fait tourner autour, sans déplacer la sonde ----
+    // ---- Caméra de poursuite du véhicule actif (alimente la télé extérieure ; la souris ne la touche pas) ----
     const P = probe.pos;
-    const d = THREE.MathUtils.clamp(P.distanceTo(bodyCenter(current)) * 0.1, 1.2, 16);
+    const active = probe === probes.voy ? 'voy' : 'iss';
+    const body = vehBody[active] || current;
+    const d = THREE.MathUtils.clamp(P.distanceTo(bodyCenter(body)) * 0.1, 1.2, 16);
     const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(probe.q);
     const back = fwd.clone().negate();
-    const side = back.clone().cross(UP); if (side.lengthSq() < 1e-6) side.set(1, 0, 0); side.normalize();
-    back.applyAxisAngle(UP, user.yaw).applyAxisAngle(side, -user.pitch);
     camera.position.copy(P).addScaledVector(back, d * 1.05).addScaledVector(UP, d * 0.32);
     const base = ahead ? P.clone().addScaledVector(ahead, d * 6).lerp(f.look, THREE.MathUtils.smoothstep(transT(trans || { t: 1 }), 0.7, 1)) : pf.look.clone().lerp(P, 0.15);
-    // En tournant autour de la sonde, le regard revient vers elle pour qu'elle reste à l'image
-    const orbitAmt = THREE.MathUtils.smoothstep(Math.abs(user.yaw) + Math.abs(user.pitch), 0.05, 0.7);
-    const lookAt = base.lerp(P, orbitAmt);
-    camera.lookAt(lookAt);
-    ship.visible = true;
-    ship.position.copy(P);
-    ship.quaternion.copy(probe.q);
-    ship.scale.setScalar(d * 0.075);
-    ship.userData.setThrust(autoThrust, simTime);
-    look.copy(lookAt);
+    camera.lookAt(base);
+    look.copy(base);
+    // L'autre véhicule reste en station près de son astre
+    const other = active === 'voy' ? 'iss' : 'voy';
+    const op = probes[other], ob = vehBody[other];
+    if (op.init && ob) {
+      const pf2 = parkFrame(ob);
+      op.pos.lerp(pf2.pos, 1 - Math.exp(-dt * 4));
+      op.q.slerp(qLookAlong(op.pos, pf2.look.clone().sub(op.pos).normalize()), 1 - Math.exp(-dt * 2));
+    }
+    placeVehicle(active, probe, body, autoThrust);
+    if (op.init) placeVehicle(other, op, ob || current, 0);
     camera.userData.baseFov = trans ? fov : targetFov;
+    // ---- Intérieur de la station : poses des télés, puis la caméra principale devient la fenêtre ----
+    if (probes.iss.init) {
+      tvPose.iss ??= { pos: new THREE.Vector3(), q: new THREE.Quaternion(), fov: 55 };
+      tvPose.voy ??= { pos: new THREE.Vector3(), q: new THREE.Quaternion(), fov: 55 };
+      if (active === 'iss') { tvPose.iss.pos.copy(camera.position); tvPose.iss.q.copy(camera.quaternion); tvPose.iss.fov = Math.max(45, fov); }
+      else {
+        const pi = probes.iss, di = THREE.MathUtils.clamp(pi.pos.distanceTo(bodyCenter(vehBody.iss || current)) * 0.1, 1.2, 16);
+        const fi = new THREE.Vector3(0, 0, 1).applyQuaternion(pi.q);
+        tvPose.iss.pos.copy(pi.pos).addScaledVector(fi, -di * 1.05).addScaledVector(UP, di * 0.32);
+        mTmp.lookAt(tvPose.iss.pos, pi.pos.clone().addScaledVector(fi, di * 2.5), UP);
+        tvPose.iss.q.setFromRotationMatrix(mTmp);
+      }
+      tvPose.voyOn = probes.voy.init;
+      if (probes.voy.init) {
+        // Caméra de bord de Voyager : posée sur la sonde, elle regarde vers l'avant
+        tvPose.voy.pos.copy(probes.voy.pos).addScaledVector(UP, 0.02);
+        tvPose.voy.q.copy(probes.voy.q).multiply(qFlip);
+        tvPose.voy.fov = 60;
+      }
+      issLook.yaw = user.yaw; issLook.pitch = THREE.MathUtils.clamp(user.pitch, -1.25, 1.25);
+      qIssLook.setFromEuler(eIss.set(issLook.pitch, Math.PI + issLook.yaw, 0, 'YXZ'));
+      camera.position.copy(probes.iss.pos);
+      camera.quaternion.copy(probes.iss.q).multiply(qIssLook);
+      camera.up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      fov = 70;
+    }
   }
   // Oculaire : masque circulaire une fois dans la lunette
   const inScope = current.telescope && (!trans || trans.t > 0.88);
@@ -1268,10 +1324,11 @@ function pushTrail(p, w) {
 
 // Cockpit sur grand écran : la vue se limite à la verrière (64 % supérieurs de l'écran)
 // Pilote automatique en vue extérieure : écran caméra central et écrans verts latéraux
-function tpvScreens() { return window.innerWidth > 760 && mode === 'auto' && views.auto === 'tpv'; }
-function cockpitLayout() { return window.innerWidth > 760 && views[mode] === 'fpv' && !(mode === 'free' && free.walker); }
+function tpvScreens() { return false; }
+function cockpitLayout() { return mode === 'free' && window.innerWidth > 760 && views[mode] === 'fpv' && !free.walker; }
 function computeViewOffset() {
   const w = window.innerWidth, h = window.innerHeight;
+  if (typeof issOn === 'function' && issOn()) { viewOffset.tx = viewOffset.ty = 0; return; }
   const mobile = w <= 760;
   if (tpvScreens()) {
     // Centre de l'écran caméra (25 vw à gauche, 23 vw à droite, 6 vh en haut, 11 vh en bas)
@@ -1574,48 +1631,8 @@ document.querySelectorAll('#flight-pad button').forEach((btn) => {
 // Longueur du vaisseau posé, à l'échelle du personnage : assez grand pour abriter cabine et soute
 const SHIP_M = 22;
 let deck = null;
-function placeRover(R, W) {
-  const up = R.p.clone().sub(W.center).normalize();
-  const f = R.heading.clone().addScaledVector(up, -R.heading.dot(up)).normalize();
-  R.obj.position.copy(R.p);
-  R.obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, f).normalize(), up, f));
-  R.obj.scale.setScalar(W.m2u);
-}
-function unmountDeck() {
-  if (!deck) return;
-  const W = deck.body.walk;
-  deck.group.removeFromParent();
-  const i = W.groups.indexOf(deck.grp); if (i >= 0) W.groups.splice(i, 1);
-  deck = null;
-}
-function mountDeck() {
-  const L = free.landed;
-  if (!L) return null;
-  if (deck && deck.body === L.body) return deck;
-  unmountDeck();
-  const b = L.body, W = b.walk, obj = b.obj;
-  const km = SHIP_M / shipLength();
-  // Cabine dans le fuselage : environ 5 m × 9 m, plancher un peu au-dessus du train d'atterrissage
-  const info = buildInterior(km, MODELS.vaisseau ? { W: 5, D: 9, FY: 1.1 } : null);
-  toonify(info.group);
-  // Repère du vaisseau posé, exprimé dans celui de l'astre
-  obj.updateMatrixWorld(true);
-  const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
-  const upL = L.localUp.clone().normalize();
-  const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion).transformDirection(inv);
-  fw.addScaledVector(upL, -fw.dot(upL)).normalize();
-  const x = new THREE.Vector3().crossVectors(upL, fw).normalize();
-  const s = W.m2u / KIT_U;
-  const pos = L.ground.clone().addScaledVector(upL, info.FY * W.m2u);
-  const m = new THREE.Matrix4().makeBasis(x, upL, fw).scale(new THREE.Vector3(s, s, s)).setPosition(pos);
-  info.group.matrixAutoUpdate = false; info.group.matrix.copy(m); info.group.name = 'deck';
-  obj.add(info.group);
-  const grp = { m, inv: m.clone().invert(), s, center: pos.clone(), radius: 16 * W.m2u, col: info.group.userData.colliders };
-  W.groups.push(grp);
-  deck = { body: b, group: info.group, grp, info, fw };
-  return deck;
-}
-const deckLocal = (w) => (deck && deck.body === w.body ? w.p.clone().applyMatrix4(deck.grp.inv) : null);
+function unmountDeck() { deck = null; }
+const deckLocal = () => null;
 function freeAction() {
   if (mode !== 'free') return;
   const w = free.walker;
@@ -1629,25 +1646,30 @@ function freeAction() {
       else life.use(it);
       return;
     }
-    const dl = deckLocal(w);
-    if (dl && deck.info.inside(dl) && dl.distanceTo(deck.info.seat) < 1.5 * KIT_U && !w.veh) {
+    // Près du vaisseau : on reprend les commandes
+    const sp = w.body.obj.worldToLocal(ship.position.clone());
+    if (free.landed && w.p.distanceTo(sp) < (SHIP_M * 0.9) * W.m2u) {
       leaveWalker();
       syncLayout();
-      hint('Aux commandes · Espace ou Z pour décoller', 5);
-    } else hint(w.veh ? '' : 'Le poste de pilotage est à l’avant du vaisseau : montez par la rampe', 3);
+      hint('Aux commandes · Espace pour décoller', 5);
+    } else hint('Rapprochez-vous du vaisseau (E) pour reprendre les commandes', 3);
     return;
   }
   if (!free.landed) { hint('Posez-vous d’abord sur une surface solide', 3); return; }
   const b = free.landed.body;
   if (!b.walk) { hint(`On ne peut pas marcher sur ${b.name}`, 3); return; }
   const W = b.walk, obj = b.obj;
-  // On se lève du siège : le personnage est dans la cabine, la rampe de soute est à tribord
-  const dk = mountDeck();
-  const p = dk.info.spawn.clone().applyMatrix4(dk.grp.m);
-  free.walker = { body: b, p, v: new THREE.Vector3(), heading: dk.fw.clone().negate(), pitch: -0.05, onGround: false, swim: false, scope: false, veh: false };
+  // On sort directement : le personnage apparaît sur le sol, à tribord du vaisseau
+  const L = free.landed;
+  const upL = L.localUp.clone().normalize();
+  const fwL = (L.fwd || new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion).transformDirection(obj.matrixWorld.clone().invert())).clone();
+  fwL.addScaledVector(upL, -fwL.dot(upL)).normalize();
+  const sideL = new THREE.Vector3().crossVectors(upL, fwL).normalize();
+  const p = L.ground.clone().addScaledVector(sideL, 11 * W.m2u).addScaledVector(upL, 1.2 * W.m2u);
+  free.walker = { body: b, p, v: new THREE.Vector3(), heading: sideL.clone(), pitch: -0.05, onGround: false, swim: false, scope: false, veh: false };
   user.yaw = user.tYaw = user.pitch = user.tPitch = 0;
   syncLayout();
-  hint('Dans le vaisseau : la rampe est à tribord · E au poste de pilotage pour reprendre les commandes', 8);
+  hint('À pied · E près du vaisseau pour reprendre les commandes', 6);
 }
 // Cibles des instruments : l'amas, le Soleil, les planètes et les galaxies du ciel
 const GALAXY_NAMES = ['Galaxie d’Andromède · M31', 'Galaxie du Tourbillon · M51', 'Galaxie du Triangle · M33', 'Galaxie du Sombrero · M104', 'Galaxie de Bode · M81', 'Galaxie du Moulinet · M101', 'Centaurus A · NGC 5128', 'Virgo A · M87', 'Galaxie de l’Aiguille · NGC 4565'];
@@ -1783,6 +1805,9 @@ function updateFree(dt) {
   free.shipScale += (scaleTarget - free.shipScale) * Math.min(1, dt * 2);
   ship.scale.setScalar(free.shipScale);
   ship.visible = true;
+  issObj.visible = false;
+  issUI && document.body.classList.remove("iss-mode");
+  issObj.visible = false;
   let thrust = 0.08, boost = false;
   let camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(ship.quaternion);
 
@@ -1850,7 +1875,7 @@ function updateFree(dt) {
     const ms = free.stick;
     const pitchIn = THREE.MathUtils.clamp((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0) + ms.y + free.touchRot.y, -1, 1);
     const yawIn = THREE.MathUtils.clamp((k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0) + ms.x + free.touchRot.x, -1, 1);
-    const rollIn = (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0);
+    const rollIn = (k.has('left') ? 1 : 0) - (k.has('right') ? 1 : 0);
     free.touchRot.x = free.touchRot.y = 0;
     // Le manche virtuel de la souris revient au neutre
     ms.x *= Math.exp(-dt * 3.5); ms.y *= Math.exp(-dt * 3.5);
@@ -1958,6 +1983,7 @@ function updateFree(dt) {
   ship.position.copy(free.pos);
   updateSpeedFx(dt, !free.landed && !free.walker);
   ship.userData.setThrust(free.landed ? 0 : thrust, simTime);
+  ship.userData.setJets?.(free.landed ? 0 : free.throttle * (1 - free.boostLvl) * 0.8 + free.boostLvl, free.landed ? 0 : free.thr.z, simTime, free.boostLvl);
   autoThrust = thrust;
   pushTrail(ship.localToWorld(new THREE.Vector3(0, 0, -1.1)), free.landed ? 0 : thrust);
   // Caméra derrière le vaisseau, dans son repère (le regard peut tourner autour en glissant)
@@ -2194,9 +2220,11 @@ function goTo(id, force = false) {
   const prev = current;
   const first = !current;
   current = b;
-  user.tYaw = user.tPitch = 0;
+  if (mode !== 'auto') user.tYaw = user.tPitch = 0;
   user.tZoom = 1;
-  let from = first ? null : prev;
+  const want = vehFor(b);
+  if (!b.telescope) useVehicle(want);
+  let from = first ? null : (prev?.telescope || b.telescope) ? prev : (vehBody[want] || null);
   if (first) {
     // Premier trajet : on décolle de la base de lancement de PROXION
     const L = launchSite();
@@ -2214,12 +2242,14 @@ function goTo(id, force = false) {
     }
   }
   startTransition(b, from);
+  if (!b.telescope) vehBody[want] = b;
   explored.add(b.id);
   saveExplored();
   updateTree();
   updateHud();
   updatePanel();
   try { history.replaceState(null, '', `#${b.id}`); } catch (e) { /* ignore */ }
+  computeViewOffset();
 }
 
 function groupOf(b) { return b.parent || b; }
@@ -2350,6 +2380,11 @@ window.addEventListener('keydown', (e) => {
   if (!current || e.target.closest?.('input, textarea')) return;
   if (cockpitLayout()) cockpit.press(cockpit.keyFor(e.code));
   if (e.code === 'KeyM') { setMode(mode === 'auto' ? 'free' : 'auto'); return; }
+  if (mode === 'auto' && issOn()) {
+    if (e.code === 'KeyE') { if (issUI) issActivate(issUI.pick(0, 0, 3.4)); return; }
+    const kk = KEYMAP[e.code];
+    if (kk === 'fwd' || kk === 'back' || kk === 'left' || kk === 'right') { e.preventDefault(); free.keys.add(kk); return; }
+  }
   if (e.code === 'KeyV' && !e.ctrlKey) { toggleView(); return; }
   if (e.code === 'KeyI') { document.body.classList.toggle('show-info'); return; }
   if (mode === 'free') {
@@ -2399,7 +2434,10 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (!pointer.down) {
     // Survol : curseur main sur les astres
-    if (ready) canvas.style.cursor = pick(e.clientX, e.clientY) || (cockpitLayout() && cockpit.keyAt(e.clientX, e.clientY)) ? 'pointer' : 'grab';
+    if (ready) {
+      const ir = mode === 'auto' && issUI && issOn() ? issUI.pick((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1, 12) : null;
+      canvas.style.cursor = ir?.action === 'goto' || pick(e.clientX, e.clientY) || (cockpitLayout() && cockpit.keyAt(e.clientX, e.clientY)) ? 'pointer' : 'grab';
+    }
     return;
   }
   const dx = e.clientX - pointer.x, dy = e.clientY - pointer.y;
@@ -2437,6 +2475,10 @@ canvas.addEventListener('pointerup', (e) => {
   canvas.releasePointerCapture?.(e.pointerId);
   canvas.style.cursor = 'grab';
   if (pointer.moved < 6) {
+    if (mode === 'auto' && issUI && issOn()) {
+      const r = issUI.pick((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1, 12);
+      if (issActivate(r)) return;
+    }
     const id = pick(e.clientX, e.clientY);
     if (id) goTo(id);
   }
@@ -2444,7 +2486,7 @@ canvas.addEventListener('pointerup', (e) => {
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (mode === 'free') free.dist = THREE.MathUtils.clamp(free.dist * Math.exp(e.deltaY * 0.001), 2, 7);
-  else user.tZoom = THREE.MathUtils.clamp(user.tZoom * Math.exp(e.deltaY * 0.001), 0.45, 2.6);
+  else if (!issOn()) user.tZoom = THREE.MathUtils.clamp(user.tZoom * Math.exp(e.deltaY * 0.001), 0.45, 2.6);
 }, { passive: false });
 
 function pick(x, y) {
@@ -2482,6 +2524,63 @@ function updateLoop(dt) {
 // ---------------------------------------------------------------------------
 // Boucle de rendu
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Intérieur de la station (pilote automatique)
+// ---------------------------------------------------------------------------
+const tvRT = {
+  iss: new THREE.WebGLRenderTarget(448, 252, { colorSpace: THREE.SRGBColorSpace }),
+  voy: new THREE.WebGLRenderTarget(448, 252, { colorSpace: THREE.SRGBColorSpace }),
+};
+const tvCam = new THREE.PerspectiveCamera(55, 16 / 9, 0.02, 30000);
+let issUI = null, tvFrame = 0, issHint = '';
+const issHintEl = document.getElementById('iss-hint');
+function ensureIss() {
+  if (issUI || !ready) return issUI;
+  const list = BODIES.filter((b) => b.obj && (b.kind === 'star' || b.kind === 'planet') && !b.sky);
+  issUI = createIss({ planets: list, getPos: (b, out) => bodyCenter(b, out), getSummary: (id) => TEXTS[id], tvTextures: { iss: tvRT.iss.texture, voy: tvRT.voy.texture } });
+  issUI.shownFor = null;
+  return issUI;
+}
+function renderTVs() {
+  if (!issOn() || !issUI) return;
+  const which = tvFrame % 4 === 0 ? 'iss' : tvFrame % 4 === 2 ? 'voy' : null;
+  tvFrame++;
+  if (!which) return;
+  const pose = tvPose[which];
+  const live = !!pose && (which === 'iss' || tvPose.voyOn);
+  issUI.setTvLive(which, live);
+  if (!live) return;
+  tvCam.position.copy(pose.pos); tvCam.quaternion.copy(pose.q);
+  tvCam.fov = pose.fov || 55; tvCam.aspect = 16 / 9; tvCam.updateProjectionMatrix();
+  sky.position.copy(tvCam.position); stars.position.copy(tvCam.position);
+  const keep = issObj.visible;
+  issObj.visible = probes.iss.init;
+  renderer.setRenderTarget(tvRT[which]);
+  renderer.render(scene, tvCam);
+  renderer.setRenderTarget(null);
+  issObj.visible = keep;
+}
+const issInput = () => ({
+  fwd: (free.keys.has('fwd') ? 1 : 0) - (free.keys.has('back') ? 1 : 0),
+  side: (free.keys.has('right') ? 1 : 0) - (free.keys.has('left') ? 1 : 0),
+});
+function issActivate(r) {
+  if (!r) return false;
+  if (r.action === 'goto' && r.id) { goTo(r.id); return true; }
+  if (r.action === 'tv') { hint('', 0); return true; }
+  return false;
+}
+function updateIss(dt) {
+  const on = issOn();
+  document.body.classList.toggle('iss-mode', on);
+  if (!on) { if (issHint) { issHintEl.classList.remove('on'); issHint = ''; } return; }
+  const ui2 = ensureIss();
+  if (ui2.shownFor !== current.id) { ui2.refreshScreens(current); ui2.shownFor = current.id; }
+  ui2.update(dt, simTime, { yaw: issLook.yaw, pitch: issLook.pitch, input: issInput(), current, aspect: window.innerWidth / window.innerHeight });
+  const r = ui2.pick(0, 0, 3.4);
+  const txt = r?.action === 'goto' ? `E : ${r.label}` : '';
+  if (txt !== issHint) { issHint = txt; issHintEl.textContent = txt; issHintEl.classList.toggle('on', !!txt); }
+}
 const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
@@ -2502,7 +2601,7 @@ function frame() {
   life?.update(dt, simTime, mode === 'free' ? free.walker : null);
     updateSpaceWeather(dt);
     if (mode === 'free' && free.init) updateFree(dt);
-    else if (current) updateCamera(dt);
+    else if (current) { updateCamera(dt); updateIss(dt); }
     if (pendingFree && !trans && current) { pendingFree = false; setMode('free'); }
     updateDashboard(dt);
     updateLabels();
@@ -2511,6 +2610,7 @@ function frame() {
     updateLoop(dt);
     belts.forEach((b) => { b.mesh.rotation.y += b.n * dt; });
   }
+  renderTVs();
   sky.position.copy(camera.position);
   stars.position.copy(camera.position);
   // Test : caméra imposée dans le repère d'un astre (?debug)
@@ -2523,7 +2623,15 @@ function frame() {
     camera.near = 0.002; camera.updateProjectionMatrix();
     camera.clearViewOffset();
   }
+  const showIss = ready && mode === 'auto' && issUI && issOn();
+  if (showIss) issObj.visible = false;      // la caméra est à l'intérieur de la station
   composer.render();
+  if (showIss) {
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(issUI.scene, issUI.camera);
+    renderer.autoClear = true;
+  }
   if (ready && cockpitLayout()) {
     renderer.autoClear = false;
     renderer.clearDepth();
@@ -2585,10 +2693,25 @@ function debugWalk(id, x, y, z, yaw = 0, pitch = -0.1) {
   syncLayout();
   return W.m2u;
 }
-if (location.search.includes('debug')) window.__debug = { shipLength, shipFootW, spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship, debugWalk, keys: free.keys, placeShipAtBase, launchSite, probe, user, get trans() { return trans; } };
+if (location.search.includes('debug')) window.__debug = { probes, vehBody, issOn, get iss() { return issUI; }, issLook, tvPose, shipLength, shipFootW, spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship, debugWalk, keys: free.keys, placeShipAtBase, launchSite, probe, user, get trans() { return trans; } };
 const gltfLoader = new GLTFLoader();
 // Modèles fournis : vaisseau, véhicule d'exploration, personnage (embarqués en base64 dans l'aperçu)
 const MODELS = {};
+// Extérieur de la station (modèle fourni, allégé) : panneaux solaires bleus, reste blanc cassé ; centré et mis à l'échelle
+function setupIssModel(m) {
+  const PANEL = /p6_ani_000_(43|45|46|47|48|49|50|51)_/;
+  m.traverse((o) => {
+    if (!o.isMesh) return;
+    const panel = PANEL.test(o.name);
+    o.material = new THREE.MeshStandardMaterial({ color: panel ? 0x1c3a78 : 0xdcdde0, metalness: panel ? 0.5 : 0.25, roughness: panel ? 0.35 : 0.6, emissive: panel ? 0x0a1840 : 0x000000, flatShading: true });
+  });
+  toonify(m);
+  const box = new THREE.Box3().setFromObject(m), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const k = 2.6 / size.x;
+  const holder = new THREE.Group();
+  m.position.sub(c); holder.add(m); holder.scale.setScalar(k);
+  issObj.add(holder);
+}
 function loadModel(name) {
   return new Promise((res) => {
     const b64 = window.__MODELS__?.[name];
@@ -2597,8 +2720,9 @@ function loadModel(name) {
     else gltfLoader.load(import.meta.env.BASE_URL + 'models/' + name + '.glb', ok, undefined, ko);
   });
 }
-const assetsP = Promise.all(['vaisseau', 'voyager', 'pnj'].map(loadModel)).then(([vaisseau, voyager, pnj]) => {
-  Object.assign(MODELS, { vaisseau, voyager, pnj });
+const assetsP = Promise.all(['vaisseau', 'voyager', 'pnj', 'iss'].map(loadModel)).then(([vaisseau, voyager, pnj, issM]) => {
+  Object.assign(MODELS, { vaisseau, voyager, pnj, iss: issM });
+  if (issM) setupIssModel(issM);
   if (vaisseau) { toonify(vaisseau); ship.userData.addVariant('awing', vaisseau, { length: 1.75, engines: true }); }
   // Voyager : antenne parabolique tournée vers l'arrière (vers le Soleil et la Terre), mât du magnétomètre dressé
   if (voyager) { toonify(voyager); ship.userData.addVariant('voyager', voyager, { width: 1.7, rotX: -Math.PI / 2, engines: false }); }

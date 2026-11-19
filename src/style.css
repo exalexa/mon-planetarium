@@ -1003,3 +1003,10 @@ body.free-tpv:not(.show-info) :is(#astro-info-container, #explore-tree, #free-he
 
 /* Vol libre : ni fiche de l'astre ni journal de bord (I pour les afficher) */
 body.free-mode:not(.show-info) :is(#astro-info-container, #explore-tree, .astro-label) { display: none !important; }
+
+/* Intérieur de la station */
+#iss-hint { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); padding: 6px 16px; font-family: var(--round); font-size: 0.84rem; font-weight: 800; color: var(--ink); background: var(--paper); border: 1px solid var(--edge); border-radius: 999px; opacity: 0; transition: opacity 0.25s; pointer-events: none; z-index: 5; }
+#iss-hint.on { opacity: 1; }
+#credits { position: fixed; left: 12px; bottom: 6px; font-size: 0.62rem; color: rgba(220, 230, 245, 0.5); z-index: 3; pointer-events: none; display: none; }
+body.iss-mode #credits { display: block; }
+body.iss-mode .astro-label { display: none !important; }
