@@ -1524,7 +1524,7 @@ function enterFree() {
   trans = null;
   trail.userData.n = 0;
   free.init = true;
-  hint('Vol libre : Z / S gaz · souris (cliquer pour la capturer) ou flèches pour diriger · Q / D roulis · Maj boost · I : informations', 7);
+  hint('Vol libre : Z / S gaz · Maj+Z boost · Maj+S freinage d’urgence · flèches ou souris pour diriger · Q / D roulis', 7);
   // L'aide des commandes se replie d'elle-même après quelques secondes
   const help = document.getElementById('free-help');
   help.classList.remove('mini');
@@ -1551,6 +1551,7 @@ function setMode(m, silent = false) {
     camera.up.set(0, 1, 0);
     // La sonde reprend la route depuis l'endroit où se trouvait le vaisseau
     probe.pos.copy(here); probe.q.copy(ship.quaternion); probe.init = true;
+    updateSpeedFx(0, false);
     trans = null;
     goTo(n.id, true);
   }
@@ -1687,6 +1688,81 @@ function insideDome() {
 
 const qStep = new THREE.Quaternion();
 const AX = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+// Vaisseau posé : solidaire du sol, il suit la rotation de l’astre (position ET cap), sans bouger par rapport à lui
+function syncLanded(snap) {
+  const L = free.landed, obj = L.body.obj;
+  const up = L.localUp.clone().transformDirection(obj.matrixWorld);
+  free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, shipFootW());
+  if (!L.fwd) {
+    const f0 = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
+    L.fwd = f0.transformDirection(obj.matrixWorld.clone().invert());
+  }
+  const f = L.fwd.clone().transformDirection(obj.matrixWorld);
+  f.addScaledVector(up, -f.dot(up));
+  if (f.lengthSq() < 1e-6) f.copy(up).cross(AX.x);
+  f.normalize();
+  mTmp.makeBasis(up.clone().cross(f).normalize(), up, f);
+  qTmp.setFromRotationMatrix(mTmp);
+  if (snap || ship.quaternion.angleTo(qTmp) < 0.08) ship.quaternion.copy(qTmp);
+  else ship.quaternion.slerp(qTmp, 0.25);
+  return up;
+}
+// Traînées de vitesse : poussière spatiale immobile dans le repère de l’astre, étirée selon la vitesse du vaisseau
+const FX_N = 300;
+const speedFx = (() => {
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(FX_N * 6), col = new Float32Array(FX_N * 6);
+  for (let i = 0; i < FX_N; i++) { col.set([0.85, 0.95, 1], i * 6); col.set([0, 0, 0], i * 6 + 3); }
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const l = new THREE.LineSegments(g, m);
+  l.frustumCulled = false; l.visible = false; l.renderOrder = 5;
+  l.userData.p = Float32Array.from({ length: FX_N * 3 }, () => Math.random() * 2 - 1);   // positions dans le cube [-1, 1]
+  return l;
+})();
+scene.add(speedFx);
+const retroGlow = (() => {
+  const grp = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    const geo = new THREE.ConeGeometry(0.09, 0.7, 10, 1, true); geo.translate(0, 0.35, 0);
+    const c = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffa24a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
+    c.rotation.x = Math.PI / 2; c.position.set(sx * 0.38, -0.55, 0.82); c.userData.flame = true;
+    grp.add(c);
+  }
+  grp.visible = false; grp.userData.flame = true;
+  return grp;
+})();
+ship.add(retroGlow);
+function updateSpeedFx(dt, show) {
+  speedFx.visible = show;
+  retroGlow.visible = show && free.retro > 0;
+  if (retroGlow.visible) retroGlow.scale.setScalar(0.7 + 0.5 * Math.random());
+  if (!show) return;
+  const len = shipLength() * free.shipScale;
+  const S = len * 14;                                   // demi-côté du cube de poussière
+  const v = free.vel, sp = v.length(), spL = sp / len;  // vitesse en longueurs de vaisseau par seconde
+  const P = speedFx.userData.p, a = speedFx.geometry.attributes.position.array;
+  const tail = Math.min(sp * 0.045, S * 0.8) * (0.4 + free.boostLvl);
+  const dir = sp > 1e-9 ? v.clone().multiplyScalar(1 / sp) : new THREE.Vector3(0, 0, 1);
+  for (let i = 0; i < FX_N; i++) {
+    let x = P[i * 3] * S - v.x * dt, y = P[i * 3 + 1] * S - v.y * dt, z = P[i * 3 + 2] * S - v.z * dt;
+    // Réapparition de l’autre côté du cube
+    if (x > S) x -= 2 * S; else if (x < -S) x += 2 * S;
+    if (y > S) y -= 2 * S; else if (y < -S) y += 2 * S;
+    if (z > S) z -= 2 * S; else if (z < -S) z += 2 * S;
+    P[i * 3] = x / S; P[i * 3 + 1] = y / S; P[i * 3 + 2] = z / S;
+    a[i * 6] = x; a[i * 6 + 1] = y; a[i * 6 + 2] = z;
+    a[i * 6 + 3] = x + dir.x * tail; a[i * 6 + 4] = y + dir.y * tail; a[i * 6 + 5] = z + dir.z * tail;
+  }
+  speedFx.geometry.attributes.position.needsUpdate = true;
+  speedFx.position.copy(free.pos);
+  const want = THREE.MathUtils.smoothstep(spL, 0.6, 10) * (0.55 + 0.4 * free.boostLvl);
+  speedFx.material.opacity += (want - speedFx.material.opacity) * Math.min(1, dt * 6);
+  // Le champ de vision s’ouvre avec la vitesse et la post-combustion, se resserre au freinage d’urgence
+  const fovWant = 55 + 7 * THREE.MathUtils.smoothstep(spL, 2, 25) + 10 * free.boostLvl - (free.retro ? 4 : 0);
+  free.fovX = (free.fovX ?? 55) + (fovWant - (free.fovX ?? 55)) * Math.min(1, dt * 3);
+}
 function updateFree(dt) {
   const k = free.keys;
   // Le regard autour du vaisseau (glisser) revient doucement dans l'axe quand on relâche
@@ -1711,20 +1787,13 @@ function updateFree(dt) {
   let camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(ship.quaternion);
 
   if (free.walker) {
+    updateSpeedFx(dt, false);
     updateWalker(dt);
     return;
   }
   if (free.landed) {
     // Posé : le vaisseau reste solidaire du sol (et tourne avec l'astre)
-    const L = free.landed, obj = L.body.obj;
-    const up = L.localUp.clone().transformDirection(obj.matrixWorld);
-    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, shipFootW());
-    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
-    f.addScaledVector(up, -f.dot(up));
-    if (f.lengthSq() < 1e-6) f.copy(up).cross(AX.x);
-    f.normalize();
-    mTmp.makeBasis(up.clone().cross(f).normalize(), up, f);
-    ship.quaternion.slerp(qTmp.setFromRotationMatrix(mTmp), Math.min(1, dt * 6));
+    const up = syncLanded(false);
     free.vel.set(0, 0, 0);
     if (k.has('fwd') && hintTimer <= 0) hint('Espace : poussée verticale pour décoller', 2);
     if (k.has('up')) {
@@ -1773,8 +1842,11 @@ function updateFree(dt) {
     // - Maj : boost ; Espace / C : propulseurs verticaux (décollage, atterrissage) ; Ctrl : dérive (vecteur vitesse libre).
     // La manœuvrabilité est meilleure à mi-gaz ; la vitesse plafonne bas près des astres.
     const ctrl = k.has('ctrl');
+    // Z : gaz · S : réduit les gaz jusqu’à l’arrêt · Maj+Z : post-combustion · Maj+S : freinage d’urgence (poussée inversée)
+    const shift = k.has('boost');
+    const emergency = shift && k.has('back');
     if (k.has('fwd')) free.throttle = Math.min(1, free.throttle + dt * 0.7);
-    if (k.has('back')) free.throttle = Math.max(0, free.throttle - dt * 0.9);
+    if (k.has('back')) free.throttle = Math.max(0, free.throttle - dt * (emergency ? 6 : 1.6));
     const ms = free.stick;
     const pitchIn = THREE.MathUtils.clamp((k.has('pu') ? 1 : 0) - (k.has('pd') ? 1 : 0) + ms.y + free.touchRot.y, -1, 1);
     const yawIn = THREE.MathUtils.clamp((k.has('yl') ? 1 : 0) - (k.has('yr') ? 1 : 0) + ms.x + free.touchRot.x, -1, 1);
@@ -1782,7 +1854,8 @@ function updateFree(dt) {
     free.touchRot.x = free.touchRot.y = 0;
     // Le manche virtuel de la souris revient au neutre
     ms.x *= Math.exp(-dt * 3.5); ms.y *= Math.exp(-dt * 3.5);
-    boost = k.has('boost');
+    boost = shift && k.has('fwd');
+    free.emergency = emergency;
     const spool = (cur, cmd, up, down) => cur + THREE.MathUtils.clamp(cmd - cur, -down * dt, up * dt);
     free.boostLvl = spool(free.boostLvl, boost ? 1 : 0, 1.2, 1.6);
     // Agilité : optimale vers 50 % des gaz (zone bleue), réduite en boost
@@ -1810,7 +1883,7 @@ function updateFree(dt) {
     free.speedSet = vBoost * (free.throttle * (1 - free.boostLvl) + free.boostLvl);
     // La vitesse rejoint la consigne avec une accélération finie (moteur), un freinage plus vif
     const vF = free.vel.dot(F);
-    const acc = (free.speedSet > vF ? 0.6 : 1.1) * Math.max(vBoost, 2);
+    const acc = (free.speedSet > vF ? 0.6 : emergency ? 5 : 1.3) * Math.max(vBoost, 2);
     const vNew = vF + THREE.MathUtils.clamp(free.speedSet - vF, -acc * dt, acc * dt);
     // Le vecteur vitesse s'aligne sur le nez (adhérence), sauf en dérive (Ctrl)
     const grip = ctrl ? 0.25 : 3.2;
@@ -1819,7 +1892,7 @@ function updateFree(dt) {
     if (!ctrl) free.vel.addScaledVector(F, vNew - free.vel.dot(F));
     free.thr.x = free.speedSet / Math.max(vBoost, 1e-3);
     free.thr.z = upIn;
-    free.retro = vF > free.speedSet + 0.5 ? 1 : 0;
+    free.retro = emergency && vF > 0.3 ? 1 : 0;
     const thrusting = free.throttle > 0.02 || upIn !== 0;
     // Gravité de l'astre dominant : g = g0 (R / r)²
     if (free.anchor) {
@@ -1883,6 +1956,7 @@ function updateFree(dt) {
     thrust = 0.06 + Math.max(0, free.thr.x) * (0.55 + 0.4 * free.boostLvl) + Math.abs(free.thr.z) * 0.12;
   }
   ship.position.copy(free.pos);
+  updateSpeedFx(dt, !free.landed && !free.walker);
   ship.userData.setThrust(free.landed ? 0 : thrust, simTime);
   autoThrust = thrust;
   pushTrail(ship.localToWorld(new THREE.Vector3(0, 0, -1.1)), free.landed ? 0 : thrust);
@@ -1944,9 +2018,7 @@ function updateWalker(dt) {
   const w = free.walker, b = w.body, W = b.walk, obj = b.obj, k = free.keys;
   // Le vaisseau reste posé (moteurs éteints)
   if (free.landed) {
-    const L = free.landed;
-    const up = L.localUp.clone().transformDirection(obj.matrixWorld);
-    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, shipFootW());
+    syncLanded(false);
     ship.position.copy(free.pos);
   }
   // De l'intérieur, on ne voit pas la coque : seulement la cabine
@@ -2063,7 +2135,7 @@ function freeHud(dt, boost) {
   const status = free.landed ? `posé sur ${free.landed.body.name}` : free.anchor ? `référentiel ${free.anchor.name}` : 'héliocentrique';
   document.getElementById('free-speed').textContent = `gaz ${Math.round(free.throttle * 100)} %${Math.abs(free.throttle - 0.5) < 0.17 ? ' (manœuvre optimale)' : ''} · ${fmt(free.vel.length() / UA, 2)} UA/s${free.boostLvl > 0.05 ? ` · boost ${Math.round(free.boostLvl * 100)} %` : ''}${free.keys.has('ctrl') ? ' · dérive' : ''} · ${status}`;
   updateTargetMarker();
-  applyProjection(dt, 55);
+  applyProjection(dt, free.walker || free.landed ? 55 : free.fovX ?? 55);
 }
 
 // Repère de la cible (désignée en cliquant un astre ou une entrée du journal)
