@@ -618,6 +618,7 @@ export function createShip() {
   // sonde Voyager du pilote automatique) ; seule la variante active est visible.
   const variants = {};
   const flames = [main, inner, ...sides, halo, sparks];
+  flames.forEach((f) => { f.userData.flame = true; });
   g.userData.addVariant = (name, model, { length = null, width = null, rotX = 0, engines = true } = {}) => {
     const holder = new THREE.Group();
     holder.add(model);

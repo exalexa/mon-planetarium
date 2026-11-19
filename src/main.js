@@ -1352,16 +1352,26 @@ const KEYMAP = {
   KeyW: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right', Space: 'up', KeyC: 'down', ShiftLeft: 'boost', ShiftRight: 'boost',
   ArrowUp: 'pu', ArrowDown: 'pd', ArrowLeft: 'yl', ArrowRight: 'yr', ControlLeft: 'ctrl', ControlRight: 'ctrl',
 };
-let shipLen1 = 0;
+let shipLen1 = 0, shipFoot1 = 0.9;
+const shipFootW = () => (shipLength(), shipFoot1 * free.shipScale);
 function shipLength() {
   if (!shipLen1) {
-    const s = ship.scale.x, p = ship.position.clone(), qq = ship.quaternion.clone();
-    ship.scale.setScalar(1); ship.position.set(0, 0, 0); ship.quaternion.identity();
-    ship.userData.setThrust(0, 0);
+    ship.userData.setVariant?.('awing');
     ship.updateMatrixWorld(true);
-    const bx = new THREE.Box3().setFromObject(ship);
+    // Mesure dans le repère du vaisseau (indépendante de sa position et de son échelle) : coque visible seulement
+    const inv = new THREE.Matrix4().copy(ship.matrixWorld).invert();
+    const bx = new THREE.Box3(), bb = new THREE.Box3(), m4 = new THREE.Matrix4();
+    ship.traverseVisible((o) => {
+      if (!o.isMesh || !o.geometry || o.userData.flame) return;
+      if (o.geometry.boundingBox === null) o.geometry.computeBoundingBox();
+      bb.copy(o.geometry.boundingBox).applyMatrix4(m4.multiplyMatrices(inv, o.matrixWorld));
+      if (bb.getCenter(tmpV).length() > 20) return;      // éléments placés dans le repère du monde (feux, flammes)
+      bx.union(bb);
+    });
+    ship.userData.setVariant?.(mode === 'free' ? 'awing' : 'voyager');
+    if (bx.isEmpty()) return 2;          // modèle pas encore chargé : on ne mémorise rien
     shipLen1 = Math.max(bx.max.x - bx.min.x, bx.max.y - bx.min.y, bx.max.z - bx.min.z) || 2;
-    ship.scale.setScalar(s); ship.position.copy(p); ship.quaternion.copy(qq);
+    shipFoot1 = Math.max(0.05, -bx.min.y);
   }
   return shipLen1;
 }
@@ -1443,7 +1453,10 @@ function placeShipAtBase() {
   const L = launchSite();
   if (!L) return false;
   enterFree();
-  const foot = 0.9 * free.shipScale;
+  // Échelle réelle tout de suite (≈ 22 m) : pas de vaisseau géant qui rétrécit sous la plate-forme
+  free.shipScale = Math.min(0.9, (SHIP_M * L.body.walk.m2u * L.body.obj.getWorldScale(tmpV).x) / shipLength());
+  ship.scale.setScalar(free.shipScale);
+  const foot = shipFootW();
   const pos = L.point.clone().addScaledVector(L.up, foot);
   const f = L.toRocket.clone().addScaledVector(L.up, -L.toRocket.dot(L.up)).normalize();
   mTmp.makeBasis(L.up.clone().cross(f).normalize(), L.up, f);
@@ -1454,7 +1467,9 @@ function placeShipAtBase() {
   free.pos.copy(pos);
   free.offset.copy(pos).sub(bodyCenter(L.body));
   ship.position.copy(pos);
-  free.camPos.copy(pos).addScaledVector(f, -6).addScaledVector(L.up, 3);
+  free.liftoff = null;
+  free.settle = 0;
+  free.camPos.copy(pos);
   hint('Base de lancement de PROXION · Espace pour décoller', 7);
   return true;
 }
@@ -1500,6 +1515,7 @@ function enterFree() {
   if (free.anchor) free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
   user.yaw = user.tYaw = user.pitch = user.tPitch = 0;
   free.camPos.copy(camera.position);
+  free.settle = 1.2; free.liftoff = null;
   ship.position.copy(free.pos);
   // Le vaisseau (avant +Z) prend l'orientation de la caméra (qui regarde vers −Z)
   ship.quaternion.copy(camera.quaternion).multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI));
@@ -1702,7 +1718,7 @@ function updateFree(dt) {
     // Posé : le vaisseau reste solidaire du sol (et tourne avec l'astre)
     const L = free.landed, obj = L.body.obj;
     const up = L.localUp.clone().transformDirection(obj.matrixWorld);
-    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, 0.9 * free.shipScale);
+    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, shipFootW());
     const f = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
     f.addScaledVector(up, -f.dot(up));
     if (f.lengthSq() < 1e-6) f.copy(up).cross(AX.x);
@@ -1710,14 +1726,46 @@ function updateFree(dt) {
     mTmp.makeBasis(up.clone().cross(f).normalize(), up, f);
     ship.quaternion.slerp(qTmp.setFromRotationMatrix(mTmp), Math.min(1, dt * 6));
     free.vel.set(0, 0, 0);
-    if (k.has('up') || k.has('fwd') || (k.has('ctrl') && k.has('pu'))) {
+    if (k.has('fwd') && hintTimer <= 0) hint('Espace : poussée verticale pour décoller', 2);
+    if (k.has('up')) {
+      // Décollage : poussée uniquement verticale, jusqu’à dégager la base
       free.landed = null;
-      free.vel.copy(up).multiplyScalar(4 * free.shipScale + 2);
+      free.liftoff = { v: 0, h: 0 };
+      free.vel.set(0, 0, 0);
       free.throttle = 0;
+      free.ang.set(0, 0, 0);
       free.offset.copy(free.pos).sub(bodyCenter(free.anchor));
-      hint('Décollage', 2);
+      hint('Décollage : poussée verticale', 3);
     }
     camUp = up;
+  } else if (free.liftoff) {
+    // Montée verticale : le nez reste à plat, aucune commande de direction, jusqu’à ~1,5 longueur de vaisseau
+    const lo = free.liftoff, c = bodyCenter(free.anchor);
+    const n = free.pos.clone().sub(c).normalize();
+    const mu = (shipLength() * free.shipScale) / SHIP_M;          // unités du monde par mètre de vaisseau
+    const hClear = SHIP_M * 1.6 * mu;
+    const vMax = 16 * mu, a = 7 * mu;
+    const vWant = Math.min(vMax, Math.sqrt(Math.max(0, 2 * a * (hClear * 1.15 - lo.h))) + 0.8 * mu);
+    lo.v += THREE.MathUtils.clamp(vWant - lo.v, -2 * a * dt, a * dt);
+    lo.h += lo.v * dt;
+    free.vel.copy(n).multiplyScalar(lo.v);
+    free.pos.addScaledVector(free.vel, dt);
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(ship.quaternion);
+    f.addScaledVector(n, -f.dot(n));
+    if (f.lengthSq() < 1e-6) f.copy(n).cross(AX.x);
+    f.normalize();
+    mTmp.makeBasis(n.clone().cross(f).normalize(), n, f);
+    ship.quaternion.slerp(qTmp.setFromRotationMatrix(mTmp), Math.min(1, dt * 6));
+    free.ang.set(0, 0, 0);
+    free.thr.x = 0; free.thr.z = 1;
+    thrust = 0.5;
+    free.offset.copy(free.pos).sub(c);
+    if (lo.h >= hClear) {
+      free.liftoff = null;
+      free.throttle = 0.12;
+      hint('Vol libre', 2);
+    }
+    camUp = n;
   } else {
     // Pilotage façon chasseur (Star Wars Squadrons) :
     // - Z / S règlent la manette des gaz (elle reste où on la laisse) ;
@@ -1809,7 +1857,7 @@ function updateFree(dt) {
     if (isLandable(a) && free.pos.distanceTo(bodyCenter(a)) < bodyRadius(a) * 2.2) {
       const hit = groundHit(a, free.pos);
       if (hit) {
-        const foot = 0.9 * free.shipScale;
+        const foot = shipFootW();
         const alt = free.pos.distanceTo(hit.point);
         const below = free.pos.clone().sub(hit.point).dot(hit.radial) < 0;
         if (alt < foot * 4 && !below && hintTimer <= 0) hint(`Approche de ${a.name} : réduisez la vitesse pour vous poser`, 0.5);
@@ -1842,7 +1890,8 @@ function updateFree(dt) {
   const qLook = ship.quaternion.clone()
     .multiply(qStep.setFromAxisAngle(AX.y, user.yaw))
     .multiply(new THREE.Quaternion().setFromAxisAngle(AX.x, -user.pitch));
-  const dist = free.dist * free.shipScale / 0.9;
+  // Caméra rigide derrière le vaisseau : toujours à la même distance (≈ 1,2 longueur), sans décalage en hauteur
+  const dist = 1.2 * shipLength() * free.shipScale * (free.dist / 3.2);
   if (views.free === 'fpv') {
     // À bord : la caméra est au poste de pilotage et regarde vers l'avant du vaisseau
     ship.visible = false;
@@ -1860,7 +1909,8 @@ function updateFree(dt) {
   } else {
     // Caméra dans l'axe, juste derrière le vaisseau, qui suit aussi son roulis
     const camWant = free.pos.clone().add(new THREE.Vector3(0, 0, -dist).applyQuaternion(qLook));
-    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, 0, dist * 2).applyQuaternion(qLook)), camUp, free.landed ? 8 : 14);
+    const camUpW = free.landed || free.liftoff ? camUp : new THREE.Vector3(0, 1, 0).applyQuaternion(qLook);
+    followCamera(dt, camWant, free.pos.clone().add(new THREE.Vector3(0, 0, dist * 2).applyQuaternion(qLook)), camUpW, 14);
   }
   freeHud(dt, boost);
 }
@@ -1871,9 +1921,16 @@ function followCamera(dt, want, target, up, stiff = 8) {
   if (ref && free.lastRef === ref) free.camPos.add(bodyCenter(ref).sub(free.lastRefPos));
   free.lastRef = ref;
   free.lastRefPos = ref ? bodyCenter(ref) : null;
-  free.camPos.lerp(want, 1 - Math.exp(-dt * stiff));
+  if (free.settle > 0) {
+    // Seulement à l’entrée en vol libre : rejoint la position derrière le vaisseau, puis la caméra devient rigide
+    free.settle -= dt;
+    free.camPos.lerp(want, 1 - Math.exp(-dt * 6));
+    camera.up.lerp(up, Math.min(1, dt * 4)).normalize();
+  } else {
+    free.camPos.copy(want);
+    camera.up.copy(up);
+  }
   camera.position.copy(free.camPos);
-  camera.up.lerp(up, Math.min(1, dt * stiff * 0.7)).normalize();
   camera.lookAt(target);
   sky.visible = true;
   document.getElementById('eyepiece').classList.remove('on');
@@ -1889,7 +1946,7 @@ function updateWalker(dt) {
   if (free.landed) {
     const L = free.landed;
     const up = L.localUp.clone().transformDirection(obj.matrixWorld);
-    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, 0.9 * free.shipScale);
+    free.pos.copy(obj.localToWorld(L.ground.clone())).addScaledVector(up, shipFootW());
     ship.position.copy(free.pos);
   }
   // De l'intérieur, on ne voit pas la coque : seulement la cabine
@@ -2314,7 +2371,7 @@ canvas.addEventListener('pointerup', (e) => {
 });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  if (mode === 'free') free.dist = THREE.MathUtils.clamp(free.dist * Math.exp(e.deltaY * 0.001), 3, 40);
+  if (mode === 'free') free.dist = THREE.MathUtils.clamp(free.dist * Math.exp(e.deltaY * 0.001), 2, 7);
   else user.tZoom = THREE.MathUtils.clamp(user.tZoom * Math.exp(e.deltaY * 0.001), 0.45, 2.6);
 }, { passive: false });
 
@@ -2456,7 +2513,7 @@ function debugWalk(id, x, y, z, yaw = 0, pitch = -0.1) {
   syncLayout();
   return W.m2u;
 }
-if (location.search.includes('debug')) window.__debug = { spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship, debugWalk, keys: free.keys, placeShipAtBase, launchSite, probe, user, get trans() { return trans; } };
+if (location.search.includes('debug')) window.__debug = { shipLength, shipFootW, spawnCME, byId, goTo, free, setMode, freeAction, bodyCenter, ship, debugWalk, keys: free.keys, placeShipAtBase, launchSite, probe, user, get trans() { return trans; } };
 const gltfLoader = new GLTFLoader();
 // Modèles fournis : vaisseau, véhicule d'exploration, personnage (embarqués en base64 dans l'aperçu)
 const MODELS = {};
